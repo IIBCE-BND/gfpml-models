@@ -132,14 +132,14 @@ def model(organism_id, ontology):
 
         parameters = {'kernel': ['rbf', 'linear'], 'gamma': [1e-3, 1e-4], 'C': [1, 10, 100]}
         parameters = {'kernel': ['rbf'], 'gamma': [1e-4], 'C': [1]}
-        clf = GridSearchCV(SVC(probability=True), parameters, cv=5, scoring='neg_log_loss', n_jobs=-1)
-        clf.fit(X_train, y_train)
-        prior_probs = clf.predict_proba(X_test)[:,1]
-        # prior_probs = np.random.uniform(0, 1, len(y_test))
+        # clf = GridSearchCV(SVC(probability=True), parameters, cv=5, scoring='neg_log_loss', n_jobs=-1)
+        # clf.fit(X_train, y_train)
+        # prior_probs = clf.predict_proba(X_test)[:,1]
+        prior_probs = np.random.uniform(0, 1, len(y_test))
         results[node] = 0.0
         results[node][index_test.isin(index_go_test)] = prior_probs
         # print(clf.best_params_)
         # print('score', clf.score(X_test, y_test))
-    results.to_csv('results_model.csv', index=True, sep='\t')
+    results.to_csv('results_model_{}_{}.csv'.format(organism_id, ontology), index=True, sep='\t')
 
 # model('celegans', 'cellular_component')
