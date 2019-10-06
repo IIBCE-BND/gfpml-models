@@ -71,3 +71,14 @@ Ver estado de los jobs del usuario:
 ```
 > squeue -u usuario
 ```
+
+## WANDB
+
+1. Instalar `wandb`:
+```
+> pip install wandb
+```
+2. Login (seleccionar opción 2):
+```
+> wandb login
+```
