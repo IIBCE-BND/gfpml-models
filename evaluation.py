@@ -163,6 +163,12 @@ def Hrecall_micro(graph, Y_pred, Y_true):
     return numerator / denominator
 
 
+def HF1_micro(graph, Y_pred, Y_true):
+    hprec = Hprecision_micro(graph, Y_pred, Y_true)
+    hrec = Hrecall_micro(graph, Y_pred, Y_true)
+    return (2 * hprec * hrec) / (hprec + hrec)
+
+
 def Hprecision_macro(graph, Y_pred, Y_true):
     # Y_pred and Y_true are dictionaries whose keys are genes and values are lists of GO terms
     value = 0
@@ -184,6 +190,18 @@ def Hrecall_macro(graph, Y_pred, Y_true):
         P = ancestors(graph, y_pred)
         T = ancestors(graph, y_true)
         value += len(P.intersection(T)) / len(T)
+    return value / len(Y_pred)
+
+
+def HF1_macro(graph, Y_pred, Y_true):
+    value = 0
+    for gene, y_pred in Y_pred.items():
+        if gene in Y_true: y_true = Y_true[gene]
+        else: y_true = []
+        P = ancestors(graph, y_pred)
+        T = ancestors(graph, y_true)
+        P_inter_T = len(P.intersection(T))
+        value += ( 2 * (P_inter_T**2) / (len(P) * len(T)) ) / ( (P_inter_T / len(P)) + (P_inter_T / len(T)) )
     return value / len(Y_pred)
 
 
