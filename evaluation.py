@@ -1,12 +1,15 @@
-import numpy as np
-import pandas as pd
-import os
 import networkx as nx
+import numpy as np
+import operator
+import os
+import pandas as pd
+
+import matplotlib
+matplotlib.use('agg')
 import matplotlib.pyplot as plt
 
 from parsers.obo import parse_obo
 
-import operator
 
 def find_root(graph, node=None):
     if node == None:
@@ -91,7 +94,7 @@ def posterior_correction(graph, prior_probs):
     return post_probs
 
 
-def evaluate(prediction, threshold=0.3):
+def evaluate(prediction, threshold=0.3, ontology_subgraph=None):
     data_post = []
     GO_terms = list(prediction.columns)
     preds = {}
