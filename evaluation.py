@@ -7,6 +7,8 @@ import matplotlib.pyplot as plt
 from parsers.obo import parse_obo
 
 import operator
+from joblib import Parallel, delayed
+from tqdm import tqdm
 
 def find_root(graph, node=None):
     if node == None:
@@ -62,6 +64,8 @@ def posterior_correction(graph, prior_probs):
             pre_probs[node] = prior_probs[node]
         else:
             parents = graph.successors(node)
+            if len(list(parents)) == 0:
+                raise ValueError('All this nodes have parents')
             P_par_1 = prior_probs[node] * np.prod([prior_probs[parent] for parent in parents])
             P_par_0 = 1 - P_par_1
             P_child_0 = (1 - prior_probs[node]) * np.prod([1 - prior_probs[parent] for parent in parents])
@@ -91,35 +95,119 @@ def posterior_correction(graph, prior_probs):
     return post_probs
 
 
-def evaluate(prediction, threshold=0.3):
+def pre_probs_parallelize(node, graph, prior_probs):
+    parents = graph.successors(node)
+    # No se porque, pero si sacas este if posterior_correction y posterior_correction_2 dejan de dar iguales
+    if len(list(parents)) == 0:
+        raise ValueError('All this nodes have parents')
+    parents_prior_probs = np.array([prior_probs[parent] for parent in parents])
+    P_par_1 = prior_probs[node] * np.prod(parents_prior_probs)
+    P_par_0 = 1 - P_par_1
+    P_child_0 = (1 - prior_probs[node]) * np.prod(1 - parents_prior_probs)
+    P_child_1 = 1 - P_child_0
+    if P_par_0 > P_child_1:
+        return P_par_1
+    else:
+        return P_child_1
+
+
+def post_probs_parallelize(node, graph, pre_probs_node, post_probs):
+    parents = list(graph.successors(node))
+    min_posterior_probs_parents = np.amin([post_probs[parent] for parent in parents])
+    return np.amin([pre_probs_node, min_posterior_probs_parents])
+
+
+def posterior_correction_2(graph, prior_probs, root, graph_nodes):
+    # preliminary_probs
+    pre_probs = [pre_probs_parallelize(node, graph, prior_probs) for node in graph_nodes]
+    pre_probs = dict(zip(graph_nodes, pre_probs))
+    pre_probs[root] = prior_probs[root]
+
+    # # posterior_correction
+    post_probs = {}
+    post_probs[root] = pre_probs[root]
+    node = root
+    childrens = list(graph.predecessors(node))
+    visited_nodes = set({root})
+    while len(childrens) > 0:
+        post_probs_aux = [post_probs_parallelize(node, graph, pre_probs[node], post_probs) for node in childrens]
+        post_probs_aux = dict(zip(childrens, post_probs_aux))
+
+        post_probs = {**post_probs, **post_probs_aux}
+        visited_nodes = visited_nodes.union(set(childrens))
+        childrens = [set(graph.predecessors(children)) for children in childrens]
+        childrens = list(set.union(*childrens))
+        childrens = [children for children in childrens if set(graph.successors(children)).issubset(visited_nodes)]
+
+    return post_probs
+
+
+def posterior_correction_parallelize(graph, prior_probs, root, graph_nodes):
+    # preliminary_probs
+    pre_probs = Parallel(n_jobs=-1, verbose=10)(delayed(pre_probs_parallelize)(node, graph, prior_probs) for node in graph_nodes)
+    pre_probs = dict(zip(graph_nodes, pre_probs))
+    pre_probs[root] = prior_probs[root]
+
+    # # posterior_correction
+    post_probs = {}
+    post_probs[root] = pre_probs[root]
+    node = root
+    childrens = list(graph.predecessors(node))
+    visited_nodes = set({root})
+    while len(childrens) > 0:
+        post_probs_aux = Parallel(n_jobs=-1, verbose=10)(delayed(post_probs_parallelize)(node, graph, pre_probs[node], post_probs) for node in childrens)
+        post_probs_aux = dict(zip(childrens, post_probs_aux))
+
+        post_probs = {**post_probs, **post_probs_aux}
+        visited_nodes = visited_nodes.union(set(childrens))
+        childrens = [set(graph.predecessors(children)) for children in childrens]
+        childrens = list(set.union(*childrens))
+        childrens = [children for children in childrens if set(graph.successors(children)).issubset(visited_nodes)]
+
+    return post_probs
+
+
+def evaluate(prediction, graph, threshold=0.3):
     data_post = []
     GO_terms = list(prediction.columns)
     preds = {}
     pos = None
-    for index, row in prediction.iterrows():
+    root = find_root(graph)
+    graph_nodes = list(graph.nodes)
+    graph_nodes.remove(root)
+    for index, row in tqdm(list(prediction.iterrows())):
         probs = list(row)
         prior_probs = dict(zip(GO_terms, probs))
-        post_probs = posterior_correction(ontology_subgraph, prior_probs)
+        post_probs = posterior_correction_2(graph, prior_probs, root, graph_nodes)
         _, probs = zip(*sorted(post_probs.items(), key=lambda x:x[0]))
         data_post.append(probs)
 
         preds[index] = [node for node in GO_terms if post_probs[node] > threshold]
 
-        # color_map = []
-        # for node in ontology_subgraph:
+        # # ckeck if old posterior_correction is equal to the new one
+        # # si comentas los ifs de las lineas 67 y 101, entonces post_probs y post_probs_old no van a ser iguales
+        # post_probs_old = posterior_correction(graph, prior_probs)
+        # post_probs_values = np.array(list(post_probs.values()))
+        # post_probs_old_values = np.array(list(post_probs_old.values()))
+        # if (post_probs != post_probs_old):
+        #     _, probs_old = zip(*sorted(post_probs_old.items(), key=lambda x:x[0]))
+        #     print('NOT EQUAL', np.sum(post_probs_values == 0) != (len(post_probs_values) - 1), np.sum(post_probs_old_values == 0) != (len(post_probs_old_values) - 1), (np.array(probs_old) <= np.array(probs)).mean(), np.mean(probs_old))
+        # else:
+        #     print(np.sum(post_probs_values == 0) != (len(post_probs_values) - 1))
+
+
         #     if post_probs[node] > threshold:
         #         color_map.append('blue')
         #     else: color_map.append('green')
-        # pos = show_graph(ontology_subgraph, pos=pos, with_labels=True, node_color=color_map)
+        # pos = show_graph(graph, pos=pos, with_labels=True, node_color=color_map)
 
-        # print(index, check_sanity(ontology_subgraph, post_probs))
+        # print(index, check_sanity(graph, post_probs))
 
     data_post = np.array(data_post)
 
-    df = pd.DataFrame(data=data_post, columns=prediction.columns, index=prediction.index)
-    df.to_csv('post_results.csv', sep='\t', index=True)
+    post_results = pd.DataFrame(data=data_post, columns=prediction.columns, index=prediction.index)
 
-    return preds
+    return post_results, preds
 
 
 def ancestors(graph, y_pred):
@@ -209,20 +297,26 @@ if __name__ == '__main__':
     organism_id = 'celegans'
     ontology = 'cellular_component'
     results = pd.read_csv('results_model_{}_{}.csv'.format(organism_id, ontology), sep='\t').set_index(['pos', 'seqname'])
+    random_results = pd.read_csv('random_results_model_{}_{}.csv'.format(organism_id, ontology), sep='\t').set_index(['pos', 'seqname'])
     go_ids = results.columns.tolist()
 
     ontology_path = '../datasets/raw/obo/go-basic.obo'
     gos, ontology_gos, go_alt_ids, ontology_graphs = parse_obo(ontology_path)
     ontology_subgraph = ontology_graphs[ontology].subgraph(go_ids)
 
-    preds = evaluate(results, threshold=0.3)
+    post_results, preds = evaluate(results, ontology_subgraph, threshold=0.3)
+    random_post_results, random_preds = evaluate(random_results, ontology_subgraph, threshold=0.3)
+
+    post_results.to_csv('post_results.csv', sep='\t', index=True)
+    random_post_results.to_csv('random_post_results.csv', sep='\t', index=True)
 
 
     annots_test = pd.read_csv('../datasets/processed/{}/{}/annots_test.csv'.format(organism_id, ontology), sep='\t')
     true_annots = {(pos, chromosome):list(set(df['go_id'].values)) for (pos, chromosome), df in annots_test.groupby(['pos', 'seqname'])}
     
     score = Hprecision_micro(ontology_subgraph, preds, true_annots)
-    print(score)
+    random_score = Hprecision_micro(ontology_subgraph, random_preds, true_annots)
+    print('Hprecision_micro', score, random_score)
     score = Hrecall_micro(ontology_subgraph, preds, true_annots)
-    print(score)
-
+    random_score = Hrecall_micro(ontology_subgraph, random_preds, true_annots)
+    print('Hrecall_micro', score, random_score)
