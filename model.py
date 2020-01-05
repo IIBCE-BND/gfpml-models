@@ -121,9 +121,11 @@ def model(organism_id, ontology):
 
     root = find_root(ontology_subgraph)
     results = pd.DataFrame(index=index_test)
+    random_results = pd.DataFrame(index=index_test)
     for node in ontology_subgraph:
         if node == root:
             results[node] = 1
+            random_results[node] = 1
             continue
         X_train, y_train, X_test, y_test, index_go_train, index_go_test = load_data(node, go_ids, ontology_subgraph, annots_train, annots_test, data_train, data_test)
 
@@ -140,6 +142,9 @@ def model(organism_id, ontology):
         results[node][index_test.isin(index_go_test)] = prior_probs
         # print(clf.best_params_)
         # print('score', clf.score(X_test, y_test))
+        random_results[node] = 0.0
+        random_results[node][index_test.isin(index_go_test)] = np.random.uniform(0, 1, len(y_test))
     results.to_csv('results_model_{}_{}.csv'.format(organism_id, ontology), index=True, sep='\t')
+    random_results.to_csv('random_results_model_{}_{}.csv'.format(organism_id, ontology), index=True, sep='\t')
 
-# model('celegans', 'cellular_component')
+model('celegans', 'cellular_component')
