@@ -179,7 +179,7 @@ def evaluate(prediction, graph, threshold=0.3):
         probs = list(row)
         prior_probs = dict(zip(GO_terms, probs))
         post_probs = posterior_correction_2(graph, prior_probs, root, graph_nodes)
-        _, probs2 = zip(*sorted(post_probs.items(), key=itemgetter(0)))
+        _, probs = zip(*sorted(post_probs.items(), key=itemgetter(0)))
         data_post.append(probs)
 
         preds[index] = [node for node in GO_terms if post_probs[node] > threshold]
