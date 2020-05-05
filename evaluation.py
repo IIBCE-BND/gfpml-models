@@ -69,6 +69,7 @@ def posterior_correction(graph, prior_probs):
             P_par_0 = 1 - P_par_1
             P_child_0 = (1 - prior_probs[node]) * np.prod([1 - prior_probs[parent] for parent in parents])
             P_child_1 = 1 - P_child_0
+            
             if P_par_0 > P_child_1: pre_probs[node] = P_par_1
             else: pre_probs[node] = P_child_1
 
@@ -120,9 +121,8 @@ def evaluate(prediction, threshold=0.3, ontology_subgraph=None):
     data_post = np.array(data_post)
 
     df = pd.DataFrame(data=data_post, columns=prediction.columns, index=prediction.index)
-    df.to_csv('post_results.csv', sep='\t', index=True)
 
-    return preds
+    return preds, df
 
 
 def ancestors(graph, y_pred):

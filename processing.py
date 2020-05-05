@@ -150,7 +150,8 @@ def calculate_seq_lea_score2(genome, expanded_annots, organism_id, window_sizes,
     genome_train.to_csv('{}/genome_train.csv'.format(save_path), index=False, sep='\t')
     genome_test.to_csv('{}/genome_test.csv'.format(save_path), index=False, sep='\t')
 
-    MIN_LIST_SIZE_TRAIN = 40
+    # MIN_LIST_SIZE_TRAIN = 40
+    MIN_LIST_SIZE_TRAIN = 200
     MIN_LIST_SIZE_TEST = 10
 
     for ontology, exp_annots_ontology in expanded_annots.groupby('ontology'):
@@ -222,9 +223,9 @@ def select_annots(annots, seq_genes):
 def process(organism_id): 
     click.echo('Processing organism {}'.format(organism_id))
     data_path = '../datasets/preprocessed/'
-    # window_sizes = [5, 10, 20, 50, 100]
+    window_sizes = [5, 10, 20, 50, 100]
     # window_sizes = [5, 100]
-    window_sizes = [5]
+    # window_sizes = [5]
 
     directory = '{}/{}/'.format(data_path, organism_id)
 

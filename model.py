@@ -12,6 +12,7 @@ import wandb
 import parsers.obo as obo
 
 from sklearn.svm import SVC
+from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import accuracy_score, recall_score, precision_score, f1_score
 from sklearn.model_selection import GridSearchCV
 
@@ -90,16 +91,18 @@ def load_data(go_id, go_ids, ontology_subgraph, annots_train, annots_test, data_
 @click.command()
 @click.argument('organism_id')
 @click.argument('ontology')
+@click.option('--track', is_flag=True)
 @click.option('--wandb-project', envvar='WANDB_PROJECT', default='gfpml')
-def model(organism_id, ontology, wandb_project):
+def model(organism_id, ontology, track, wandb_project):
     run_name = '{}_{}_{}'.format(time.strftime('%Y%m%d%H%M%S'), organism_id, ontology)
     click.echo('Starting run "{}"'.format(run_name))
 
-    wandb.init(
-        anonymous='allow',
-        project=wandb_project,
-        name=run_name
-    )
+    if track:
+        wandb.init(
+            anonymous='allow',
+            project=wandb_project,
+            name=run_name
+        )
 
     data_path = '../datasets/processed/{}/'.format(organism_id)
     genome = pd.read_csv('../datasets/preprocessed/{}/genome.csv'.format(organism_id), sep='\t')
@@ -149,10 +152,6 @@ def model(organism_id, ontology, wandb_project):
     root = find_root(ontology_subgraph)
     results = pd.DataFrame(index=index_test)
 
-    wandb.config.organism_id = organism_id
-    wandb.config.ontology = ontology
-    wandb.config.go_ids_len = len(go_ids)
-
     metrics = {
         'acc': {},
         'precision': {},
@@ -160,20 +159,26 @@ def model(organism_id, ontology, wandb_project):
         'f1': {}
     }
 
-    metric_cols = metrics.keys()
-    metric_table = wandb.Table(
-        columns=[
-            'node', 'params', 'x_train', 'x_test', 'y_train_mean', 'y_test_mean'
-        ] + list(metric_cols)
-    )
+    if track:
+        wandb.config.organism_id = organism_id
+        wandb.config.ontology = ontology
+        wandb.config.go_ids_len = len(go_ids)
+
+        metric_cols = metrics.keys()
+        metric_table = wandb.Table(
+            columns=[
+                'node', 'params', 'x_train', 'x_test', 'y_train_mean', 'y_test_mean'
+            ] + list(metric_cols)
+        )
 
     for node in ontology_subgraph:
         if node == root:
             results[node] = 1
             continue
 
-        # if len(metrics['acc']) > 10:
-        #     break
+        # if len(metrics['acc']) > 3:
+        #     results[node] = 1
+        #     continue
 
         click.echo('Training model for node {}'.format(node))
         X_train, y_train, X_test, y_test, index_go_train, index_go_test = load_data(
@@ -181,38 +186,50 @@ def model(organism_id, ontology, wandb_project):
         )
 
         # MODEL
-        # print(node, y_test.mean(), y_train.mean(), X_train.shape)
+        print(node, y_test.mean(), y_train.mean(), X_train.shape)
 
+        # base_model = SVC(probability=True)
         # parameters = {'kernel': ['rbf', 'linear'], 'gamma': [1e-3, 1e-4], 'C': [1, 10, 100]}
-        parameters = {'kernel': ['rbf'], 'gamma': [1e-4], 'C': [1]}
-
+        # parameters = {'kernel': ['rbf'], 'gamma': [1e-4], 'C': [1]}
         # parameters = {'kernel': ['linear'], 'gamma': [1e-4], 'C': [10]}
+
+        base_model = RandomForestClassifier(n_jobs=-1)
+
+        parameters = {
+            # 'bootstrap': [True, False],
+            'max_depth': [10, 25, 50, None],
+            # 'max_features': ['auto', 'sqrt'],
+            'min_samples_leaf': [1, 4],
+            'min_samples_split': [2, 10],
+            'n_estimators': [50, 100, 200]
+        }
 
         try:
             clf = GridSearchCV(
-                SVC(probability=True), 
+                base_model,
                 parameters,
-                cv=5, 
-                scoring='neg_log_loss', 
-                n_jobs=-1, 
+                cv=3,
+                scoring='neg_log_loss',
+                n_jobs=-1,
                 verbose=100
             )
             clf.fit(X_train, y_train)
             pred = clf.predict(X_test)
-            pred_prob = clf.predict_proba(X_test)[:,1]
+            prior_probs = clf.predict_proba(X_test)[:,1]
 
             results[node] = 0.0
-            results[node][index_test.isin(index_go_test)] = pred_prob
+            results[node][index_test.isin(index_go_test)] = prior_probs
 
             metrics['acc'][node] = accuracy_score(y_test, pred)
             metrics['recall'][node] = recall_score(y_test, pred)
             metrics['precision'][node] = precision_score(y_test, pred)
             metrics['f1'][node] = f1_score(y_test, pred)
 
-            metric_table.add_data(
-                node, clf.best_params_, X_train.shape, X_test.shape, y_train.mean(), y_test.mean(),
-                *[metrics[m][node] for m in metric_cols]
-            )
+            if track:
+                metric_table.add_data(
+                    node, clf.best_params_, X_train.shape, X_test.shape, y_train.mean(), y_test.mean(),
+                    *[metrics[m][node] for m in metric_cols]
+                )
 
         except Exception as ex:
             results[node] = 1
@@ -222,17 +239,12 @@ def model(organism_id, ontology, wandb_project):
     if not os.path.exists(run_dir):
         os.mkdir(run_dir)
 
-    results_path = os.path.join(run_dir, 'results_model_{}_{}.csv'.format(organism_id, ontology)) 
+    results_path = os.path.join(run_dir, 'results_model_{}_{}.csv'.format(organism_id, ontology))
     results.to_csv( results_path,index=True, sep='\t')
-
-    wandb.save(results_path)
-
-    # Report metrics.
-    wandb.log({'metrics': metric_table})
 
     # Evaluate accumulated predictions.
     click.echo('Evaluation')
-    preds = evaluate(results, threshold=0.3, ontology_subgraph=ontology_subgraph)
+    preds, df_preds = evaluate(results, threshold=0.3, ontology_subgraph=ontology_subgraph)
 
     true_annots = {
         (pos, chromosome):list(set(df['go_id'].values))
@@ -240,12 +252,33 @@ def model(organism_id, ontology, wandb_project):
     }
 
     test_h_precision_micro = Hprecision_micro(ontology_subgraph, preds, true_annots)
-    click.echo('Hprecision_micro', test_h_precision_micro)
-    wandb.run.summary['test_h_precision_micro'] = test_h_precision_micro
+    click.echo('Hprecision_micro: {}'.format(test_h_precision_micro))
 
     test_h_recall_micro = Hrecall_micro(ontology_subgraph, preds, true_annots)
-    click.echo('Hrecall_micro', test_h_recall_micro)
-    wandb.run.summary['test_h_recall_micro'] = test_h_recall_micro
+    click.echo('Hrecall_micro: {}'.format(test_h_recall_micro))
+
+    gene_id_map = genome_test.groupby(genome_test.index).id.first().to_dict()
+    df_preds['gene_id'] = df_preds.index.map(lambda idx: gene_id_map[(idx[0], idx[1])])
+    df_preds.set_index('gene_id', append=True, inplace=True)
+    df_preds.to_csv(os.path.join(run_dir, 'post_results.csv'), sep='\t', index=True)
+
+    df_preds_flatten = df_preds.reset_index().melt(
+        id_vars=['gene_id', 'seqname', 'pos'],
+        var_name='GO',
+        value_name='prob'
+    )
+    df_preds_flatten = df_preds_flatten[df_preds_flatten.prob > 0]
+    df_preds_flatten.to_csv(
+        os.path.join(run_dir, 'post_results_flatten.csv'),
+        sep='\t',
+        index=True
+    )
+
+    if track:
+        wandb.save(results_path)
+        wandb.log({'metrics': metric_table})
+        wandb.run.summary['test_h_precision_micro'] = test_h_precision_micro
+        wandb.run.summary['test_h_recall_micro'] = test_h_recall_micro
 
 
 if __name__ == "__main__":
