@@ -86,11 +86,11 @@ def calculate_enrichment(gene_pos, window_size):
 #                 test_data = {'pos':pos_test, 'gene_id':gene_test}
 #                 test_df = pd.DataFrame(data=test_data)
 
-#                 train_df.to_csv('{}/train.csv'.format(save_path), sep='\t', index=False)
-#                 test_df.to_csv('{}/test.csv'.format(save_path), sep='\t', index=False)
+#                 train_df.to_csv('{}/train.csv'.format(save_path), sep='\t')
+#                 test_df.to_csv('{}/test.csv'.format(save_path), sep='\t')
 
-#             go_annots_pos_train.to_csv('{}/{}_train.csv'.format(save_path, go_id), sep='\t', index=False)
-#             go_annots_pos_test.to_csv('{}/{}_test.csv'.format(save_path, go_id), sep='\t', index=False)
+#             go_annots_pos_train.to_csv('{}/{}_train.csv'.format(save_path, go_id), sep='\t')
+#             go_annots_pos_test.to_csv('{}/{}_test.csv'.format(save_path, go_id), sep='\t')
 
 
 #             seq_score[go_id] = score_function(seq_len, pos_train)
@@ -101,12 +101,12 @@ def calculate_enrichment(gene_pos, window_size):
 
 #         if len(seq_score) > 0:
 #             seq_score = pd.DataFrame(data=seq_score)
-#             seq_score.to_csv('{}/seq_score_{}.csv'.format(save_path, ontology), sep='\t', index=False)
+#             seq_score.to_csv('{}/seq_score_{}.csv'.format(save_path, ontology), sep='\t')
 
 #         for ws in window_sizes:
 #             if len(seq_lea_ontology[ws]) > 0:
 #                 seq_lea_ontology[ws] = pd.DataFrame(data=seq_lea_ontology[ws])
-#                 seq_lea_ontology[ws].to_csv('{}/seq_lea_{}_{}.csv'.format(save_path, ws, ontology), sep='\t', index=False)
+#                 seq_lea_ontology[ws].to_csv('{}/seq_lea_{}_{}.csv'.format(save_path, ws, ontology), sep='\t')
 
 
 def calculate_seq_lea_parallelize(go_id, go_annots_train, organism_id, ontology, save_path_ont, len_chromosomes, window_sizes):
@@ -128,7 +128,7 @@ def calculate_seq_lea_parallelize(go_id, go_annots_train, organism_id, ontology,
     # columns = ['pos', 'seqname', 'score'] + ['lea_{}'.format(ws) for ws in window_sizes]
     columns = ['pos', 'seqname'] + ['lea_{}'.format(ws) for ws in window_sizes]
     data = data[columns]
-    data.to_csv('{}/{}.csv'.format(save_path_ont, go_id), index=False, sep='\t')
+    data.to_csv('{}/{}.csv'.format(save_path_ont, go_id), sep='\t')
 
 
 def calculate_seq_lea(genome, expanded_annots, organism_id, window_sizes):
@@ -144,8 +144,8 @@ def calculate_seq_lea(genome, expanded_annots, organism_id, window_sizes):
     len_chromosomes = dict(genome.groupby('seqname').size())
 
     genome_train, genome_test, _, _ = train_test_split(genome, genome, train_size=train_size)
-    genome_train.to_csv('{}/genome_train.csv'.format(save_path), index=False, sep='\t')
-    genome_test.to_csv('{}/genome_test.csv'.format(save_path), index=False, sep='\t')
+    genome_train.to_csv('{}/genome_train.csv'.format(save_path), sep='\t')
+    genome_test.to_csv('{}/genome_test.csv'.format(save_path), sep='\t')
 
     MIN_LIST_SIZE_TRAIN = 40
     MIN_LIST_SIZE_TEST = 10
@@ -175,8 +175,8 @@ def calculate_seq_lea(genome, expanded_annots, organism_id, window_sizes):
 
         annots_train = annots_train[annots_train['go_id'].isin(gos_inter)]
         annots_test = annots_test[annots_test['go_id'].isin(gos_inter)]
-        annots_train.to_csv('{}/annots_train.csv'.format(save_path_ont), index=False, sep='\t')
-        annots_test.to_csv('{}/annots_test.csv'.format(save_path_ont), index=False, sep='\t')
+        annots_train.to_csv('{}/annots_train.csv'.format(save_path_ont), sep='\t')
+        annots_test.to_csv('{}/annots_test.csv'.format(save_path_ont), sep='\t')
 
         Parallel(n_jobs=-1, verbose=10)(
             delayed(calculate_seq_lea_parallelize)(go_id,
