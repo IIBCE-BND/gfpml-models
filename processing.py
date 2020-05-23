@@ -21,11 +21,6 @@ def find_root(graph, node=None):
     if len(parents) == 0: return node
     else: return find_root(graph, parents[0])
 
-def get_gene_identifier(genome):
-    if 'name' in genome.columns: gene_identifier = 'name'
-    elif 'id' in genome.columns: gene_identifier = 'id'
-    return gene_identifier
-
 def reshape_lea(gene_pos, window_size):
     n = len(gene_pos)
     w = window_size
@@ -117,7 +112,7 @@ def calculate_enrichment(gene_pos, window_size):
 def calculate_seq_lea_parallelize(go_id, go_annots_train, organism_id, ontology, save_path_ont, len_chromosomes, window_sizes):
     data = []
     for seqname, seq_annots in go_annots_train.groupby('seqname'):
-        positions = list(seq_annots.pos.values)
+        positions = (seq_annots.reset_index(inplace=False)).pos.values
 
         # seq_score = score_function(len_chromosomes[seqname], positions)
         # data_seq = {'pos': range(len_chromosomes[seqname]), 'seqname': seqname, 'score': seq_score}
@@ -136,8 +131,7 @@ def calculate_seq_lea_parallelize(go_id, go_annots_train, organism_id, ontology,
     data.to_csv('{}/{}.csv'.format(save_path_ont, go_id), index=False, sep='\t')
 
 
-def calculate_seq_lea(genome, expanded_annots, organism_id, window_sizes, depths):
-    gene_identifier = get_gene_identifier(genome)
+def calculate_seq_lea(genome, expanded_annots, organism_id, window_sizes):
     train_size = 0.8
 
     save_path = '../datasets/processed/'
@@ -155,30 +149,20 @@ def calculate_seq_lea(genome, expanded_annots, organism_id, window_sizes, depths
 
     MIN_LIST_SIZE_TRAIN = 40
     MIN_LIST_SIZE_TEST = 10
-    MAX_DEPTH = 1000
 
     for ontology, exp_annots_ontology in expanded_annots.groupby('ontology'):
         save_path_ont = '{}/{}/'.format(save_path, ontology)
         if not os.path.exists(save_path_ont):
             os.mkdir(save_path_ont)
 
-        annots_train = exp_annots_ontology[exp_annots_ontology.gene_id.isin(genome_train[gene_identifier])]
-        annots_test = exp_annots_ontology[exp_annots_ontology.gene_id.isin(genome_test[gene_identifier])]
+        annots_train = exp_annots_ontology[exp_annots_ontology.index.isin(genome_train.index)]
+        annots_test = exp_annots_ontology[exp_annots_ontology.index.isin(genome_test.index)]
 
         grouped_train = annots_train.groupby('go_id')
         grouped_test = annots_test.groupby('go_id')
 
-        dephs_train = np.array([depths[go] for go,_ in grouped_train])
-        dephs_test = np.array([depths[go] for go,_ in grouped_test])
-
-        grouped_train = np.array(grouped_train)[
-            np.array(grouped_train.size() >= MIN_LIST_SIZE_TRAIN) &
-            np.array(dephs_train <= MAX_DEPTH)
-        ]
-        grouped_test = np.array(grouped_test)[
-            np.array(grouped_test.size() >= MIN_LIST_SIZE_TEST) &
-            np.array(dephs_train <= MAX_DEPTH)
-        ]
+        grouped_train = np.array(grouped_train)[np.array(grouped_train.size() >= MIN_LIST_SIZE_TRAIN)]
+        grouped_test = np.array(grouped_test)[np.array(grouped_test.size() >= MIN_LIST_SIZE_TEST)]
 
         gos_train, _ = zip(*grouped_train)
         gos_test, _ = zip(*grouped_test)
@@ -223,9 +207,9 @@ def calculate_seq_lea(genome, expanded_annots, organism_id, window_sizes, depths
 
 #     return score
 
-def select_annots(annots, seq_genes):
-    gene_identifier = get_gene_identifier(seq_genes)
-    return annots[annots['gene_id'].isin(seq_genes[gene_identifier].values)]
+# def select_annots(annots, seq_genes):
+#     gene_identifier = get_gene_identifier(seq_genes)
+#     return annots[annots['gene_id'].isin(seq_genes[gene_identifier].values)]
 
 
 if __name__ == '__main__':
@@ -236,29 +220,19 @@ if __name__ == '__main__':
     gos, ontology_gos, go_alt_ids, ontology_graphs = obo.parse_obo(ontology_path)
 
     for organism_id in os.listdir(data_path):
-        if organism_id in ['mm', 'hg']:
+        if organism_id not in ['celegans']:
             continue
         print(organism_id)
         directory = '{}/{}/'.format(data_path, organism_id)
 
         genome = pd.read_csv('{}/genome.csv'.format(directory), sep='\t')
-        gene_identifier = get_gene_identifier(genome)
-
+        genome = genome.set_index(['pos', 'seqname'])
         expanded_annots = pd.read_csv('{}/expanded_annots.csv'.format(directory), sep='\t')
-        expanded_annots = expanded_annots[expanded_annots.gene_id.isin(genome[gene_identifier])]
-
-        depths = {}
-        for ontology, antology_annots in expanded_annots.groupby(['ontology']):
-            ontology_subgraph = ontology_graphs[ontology].subgraph(antology_annots.go_id.unique())
-            root = find_root(ontology_subgraph)
-            graph_distances = nx.shortest_path_length(ontology_subgraph,target=root)
-            depths = {**depths, **graph_distances}
-        
-        # expanded_annots['depths'] = expanded_annots['go_id'].map(depths)
+        expanded_annots = expanded_annots.set_index(['pos', 'seqname'])
 
         calculate_seq_lea(genome,
                           expanded_annots,
                           organism_id,
-                          window_sizes,
-                          depths)
+                          window_sizes
+                          )
 
