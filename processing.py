@@ -1,6 +1,5 @@
 import numpy as np
 import networkx as nx
-import matplotlib.pyplot as plt
 import pandas as pd
 import os
 
@@ -131,7 +130,7 @@ def calculate_seq_lea_parallelize(go_id, go_annots_train, organism_id, ontology,
     data.to_csv('{}/{}.csv'.format(save_path_ont, go_id), sep='\t')
 
 
-def calculate_seq_lea(genome, expanded_annots, organism_id, window_sizes):
+def calculate_seq_lea(genome, expanded_annots, organism_id, window_sizes, depths):
     train_size = 0.8
 
     save_path = '../datasets/processed/'
@@ -149,8 +148,12 @@ def calculate_seq_lea(genome, expanded_annots, organism_id, window_sizes):
 
     MIN_LIST_SIZE_TRAIN = 40
     MIN_LIST_SIZE_TEST = 10
+    MAX_DEPTH = 1000
 
     for ontology, exp_annots_ontology in expanded_annots.groupby('ontology'):
+        if ontology != 'biological_process':
+            continue
+        print(ontology)
         save_path_ont = '{}/{}/'.format(save_path, ontology)
         if not os.path.exists(save_path_ont):
             os.mkdir(save_path_ont)
@@ -161,8 +164,17 @@ def calculate_seq_lea(genome, expanded_annots, organism_id, window_sizes):
         grouped_train = annots_train.groupby('go_id')
         grouped_test = annots_test.groupby('go_id')
 
-        grouped_train = np.array(grouped_train)[np.array(grouped_train.size() >= MIN_LIST_SIZE_TRAIN)]
-        grouped_test = np.array(grouped_test)[np.array(grouped_test.size() >= MIN_LIST_SIZE_TEST)]
+        # dephs_train = np.array([depths[go] for go,_ in grouped_train])
+        # dephs_test = np.array([depths[go] for go,_ in grouped_test])
+
+        grouped_train = np.array(grouped_train)[
+            np.array(grouped_train.size() >= MIN_LIST_SIZE_TRAIN)
+            # np.array(dephs_train <= MAX_DEPTH)
+        ]
+        grouped_test = np.array(grouped_test)[
+            np.array(grouped_test.size() >= MIN_LIST_SIZE_TEST)
+            # np.array(dephs_train <= MAX_DEPTH)
+        ]
 
         gos_train, _ = zip(*grouped_train)
         gos_test, _ = zip(*grouped_test)
@@ -220,8 +232,6 @@ if __name__ == '__main__':
     gos, ontology_gos, go_alt_ids, ontology_graphs = obo.parse_obo(ontology_path)
 
     for organism_id in os.listdir(data_path):
-        if organism_id not in ['celegans']:
-            continue
         print(organism_id)
         directory = '{}/{}/'.format(data_path, organism_id)
 
@@ -230,9 +240,18 @@ if __name__ == '__main__':
         expanded_annots = pd.read_csv('{}/expanded_annots.csv'.format(directory), sep='\t')
         expanded_annots = expanded_annots.set_index(['pos', 'seqname'])
 
+        depths = {}
+        # for ontology, antology_annots in expanded_annots.groupby(['ontology']):
+        #     ontology_subgraph = ontology_graphs[ontology].subgraph(antology_annots.go_id.unique())
+        #     root = find_root(ontology_subgraph)
+        #     graph_distances = nx.shortest_path_length(ontology_subgraph,target=root)
+        #     depths = {**depths, **graph_distances}
+        
+        # expanded_annots['depths'] = expanded_annots['go_id'].map(depths)
+
         calculate_seq_lea(genome,
                           expanded_annots,
                           organism_id,
-                          window_sizes
-                          )
+                          window_sizes,
+                          depths)
 

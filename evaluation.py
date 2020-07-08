@@ -2,13 +2,13 @@ import numpy as np
 import pandas as pd
 import os
 import networkx as nx
-import matplotlib.pyplot as plt
+from joblib import Parallel, delayed
+from tqdm import tqdm
 
 from parsers.obo import parse_obo
 
 from operator import itemgetter
-from joblib import Parallel, delayed
-from tqdm import tqdm
+import itertools
 
 def find_root(graph, node=None):
     if node == None:
@@ -210,6 +210,31 @@ def evaluate(prediction, graph, threshold=0.3):
     return post_results, preds
 
 
+def evaluate2(prediction, graph, thresholds):
+    data_post = []
+    GO_terms = list(prediction.columns)
+    preds = {th:{} for th in thresholds}
+    pos = None
+    root = find_root(graph)
+    graph_nodes = list(graph.nodes)
+    graph_nodes.remove(root)
+    for index, row in tqdm(list(prediction.iterrows())):
+        probs = list(row)
+        prior_probs = dict(zip(GO_terms, probs))
+        post_probs = posterior_correction_2(graph, prior_probs, root, graph_nodes)
+        _, probs = zip(*sorted(post_probs.items(), key=itemgetter(0)))
+        data_post.append(probs)
+
+        for th in thresholds:
+            preds[th][index] = [node for node in GO_terms if post_probs[node] > float(th)]
+
+    data_post = np.array(data_post)
+
+    post_results = pd.DataFrame(data=data_post, columns=prediction.columns, index=prediction.index)
+
+    return post_results, preds
+
+
 def ancestors(graph, y_pred):
     # y_pred are the GO terms predicted for a single gene
     # return the set of ancestors of GO terms in y_pred in the ontology
@@ -257,6 +282,28 @@ def HF1_micro(graph, Y_pred, Y_true):
     return (2 * hprec * hrec) / (hprec + hrec)
 
 
+def metrics_micro(graph, Y_pred, Y_true):
+    numerator = 0
+    denominator1 = 0
+    denominator2 = 0
+    res = {th:[] for th in Y_pred}
+    for th in Y_pred:
+        for gene, y_pred in Y_pred[th].items():
+            if gene in Y_true: y_true = Y_true[gene]
+            else: y_true = []
+            P = ancestors(graph, y_pred)
+            T = ancestors(graph, y_true)
+            numerator += len(P.intersection(T))
+            denominator2 += len(T)
+            denominator1 += len(P)
+        hprec = numerator / denominator1
+        hrec = numerator / denominator2
+        hf1 = (2 * hprec * hrec) / (hprec + hrec)
+        res[th] = [hprec, hrec, hf1]
+
+    return res
+
+
 def Hprecision_macro(graph, Y_pred, Y_true):
     # Y_pred and Y_true are dictionaries whose keys are genes and values are lists of GO terms
     value = 0
@@ -294,29 +341,90 @@ def HF1_macro(graph, Y_pred, Y_true):
 
 
 if __name__ == '__main__':
-    organism_id = 'celegans'
-    ontology = 'cellular_component'
-    results = pd.read_csv('results_model_{}_{}.csv'.format(organism_id, ontology), sep='\t').set_index(['pos', 'seqname'])
-    random_results = pd.read_csv('random_results_model_{}_{}.csv'.format(organism_id, ontology), sep='\t').set_index(['pos', 'seqname'])
-    go_ids = results.columns.tolist()
-
     ontology_path = '../datasets/raw/obo/go-basic.obo'
     gos, ontology_gos, go_alt_ids, ontology_graphs = parse_obo(ontology_path)
-    ontology_subgraph = ontology_graphs[ontology].subgraph(go_ids)
 
-    post_results, preds = evaluate(results, ontology_subgraph, threshold=0.3)
-    random_post_results, random_preds = evaluate(random_results, ontology_subgraph, threshold=0.3)
+    PATHS = ['results', 'complete']
+    ORGANISMS_ID = ['scer', 'celegans', 'dmel', 'hg', 'mm']
+    ONTOLOGIES = ['cellular_component', 'molecular_function', 'biological_process']
 
-    post_results.to_csv('post_results.csv', sep='\t', index=True)
-    random_post_results.to_csv('random_post_results.csv', sep='\t', index=True)
+    def evaluation2(PATH, organism_id, ontology):
+        print(organism_id, ontology)
 
+        results = pd.read_csv('./{}/{}_model_{}_{}.csv'.format(PATH, PATH, organism_id, ontology), sep='\t', dtype={'seqname':str}).set_index(['pos', 'seqname'])
+        # random_results = pd.read_csv('random_results_model_{}_{}.csv'.format(organism_id, ontology), sep='\t', dtype={'seqname':str}).set_index(['pos', 'seqname'])
 
-    annots_test = pd.read_csv('../datasets/processed/{}/{}/annots_test.csv'.format(organism_id, ontology), sep='\t')
-    true_annots = {(pos, chromosome):list(set(df['go_id'].values)) for (pos, chromosome), df in annots_test.groupby(['pos', 'seqname'])}
-    
-    score = Hprecision_micro(ontology_subgraph, preds, true_annots)
-    random_score = Hprecision_micro(ontology_subgraph, random_preds, true_annots)
-    print('Hprecision_micro', score, random_score)
-    score = Hrecall_micro(ontology_subgraph, preds, true_annots)
-    random_score = Hrecall_micro(ontology_subgraph, random_preds, true_annots)
-    print('Hrecall_micro', score, random_score)
+        go_ids = results.columns.tolist()
+        ontology_subgraph = ontology_graphs[ontology].subgraph(go_ids)
+
+        # post_results, preds = evaluate(results, ontology_subgraph, threshold=0.3)
+        # random_post_results, random_preds = evaluate(random_results, ontology_subgraph, threshold=0.3)
+
+        random_results = np.random.uniform(size=results.shape)*(results != 0)
+        random_results = pd.DataFrame(random_results, columns=results.columns, index=results.index)
+
+        flatten = np.array(results).flatten()
+        ind = np.argwhere(flatten != 0)
+        ind2 = np.random.permutation(ind)
+        flatten.flat[ind] = flatten[ind2]
+        random_permutation = flatten.reshape(-1, results.shape[1])
+        random_permutation = pd.DataFrame(random_permutation, columns=results.columns, index=results.index)
+
+        thresholds = ['0.1', '0.2', '0.3', '0.4', '0.5', '0.6', '0.7', '0.8', '0.9', '0.95']
+
+        post_results, preds = evaluate2(results, ontology_subgraph, thresholds)
+        random_post_results, random_preds = evaluate2(random_results, ontology_subgraph, thresholds)
+        permutation_post_results, permutation_preds = evaluate2(random_permutation, ontology_subgraph, thresholds)
+
+        if not os.path.exists('./{}'.format(PATH)):
+            os.mkdir('./{}'.format(PATH))
+        if not os.path.exists('./{}/post'.format(PATH)):
+            os.mkdir('./{}/post'.format(PATH))
+
+        post_results.to_csv('./{}/post/post_results_{}_{}.csv'.format(PATH, organism_id, ontology), sep='\t', index=True)
+        # random_post_results.to_csv('random_post_results.csv', sep='\t', index=True)
+
+        annots_test = pd.read_csv('../datasets/processed/{}/{}/annots_test.csv'.format(organism_id, ontology), sep='\t', dtype={'seqname':str})
+        true_annots = {(pos, chromosome):list(set(df['go_id'].values)) for (pos, chromosome), df in annots_test.groupby(['pos', 'seqname'])}
+
+        # score = Hprecision_micro(ontology_subgraph, preds, true_annots)
+        # random_score = Hprecision_micro(ontology_subgraph, random_preds, true_annots)
+        # print('Hprecision_micro', score, random_score)
+        # score = Hrecall_micro(ontology_subgraph, preds, true_annots)
+        # random_score = Hrecall_micro(ontology_subgraph, random_preds, true_annots)
+        # print('Hrecall_micro', score, random_score)
+
+        metrics_results = metrics_micro(ontology_subgraph, preds, true_annots)
+        metrics_random = metrics_micro(ontology_subgraph, random_preds, true_annots)
+        metrics_permutation = metrics_micro(ontology_subgraph, permutation_preds, true_annots)
+
+        evaluation = []
+        for th in thresholds:
+            metrics = list(itertools.chain.from_iterable([metrics_results[th], metrics_random[th], metrics_permutation[th]]))        
+            evaluation.append(metrics)
+
+        columns = [
+            'prec', 'recall', 'f1',
+            'rand_prec', 'rand_recall', 'rand_f1',
+            'perm_prec', 'perm_recall', 'perm_f1'
+        ]
+        evaluation = np.array(evaluation)
+        evaluation = pd.DataFrame(evaluation, columns=columns, index=thresholds)
+
+        columns = ['prec', 'rand_prec', 'perm_prec',
+                'recall', 'rand_recall', 'perm_recall',
+                'f1', 'rand_f1', 'perm_f1',
+                ]
+        evaluation = evaluation[columns]
+        
+        if not os.path.exists('./{}'.format(PATH)):
+            os.mkdir('./{}'.format(PATH))
+        if not os.path.exists('./{}/metrics'.format(PATH)):
+            os.mkdir('./{}/metrics'.format(PATH))
+
+        evaluation.to_csv('./{}/metrics/metrics_{}_{}.csv'.format(PATH, organism_id, ontology), sep='\t', index=True)
+
+    # evaluation2('results', 'mm', 'cellular_component')
+
+    Parallel(n_jobs=-1, verbose=10)(delayed(evaluation2)(p[0], p[1], p[2]) for p in itertools.product(['complete'], ['mm'], ['biological_process']))
+    # Parallel(n_jobs=-1, verbose=10)(delayed(evaluation2)(p[0], p[1], p[2]) for p in itertools.product(PATHS, ORGANISMS_ID, ONTOLOGIES))
