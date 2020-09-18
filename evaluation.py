@@ -253,8 +253,7 @@ def Hprecision_micro(graph, Y_pred, Y_true):
     numerator = 0
     denominator = 0
     for gene, y_pred in Y_pred.items():
-        if gene in Y_true: y_true = Y_true[gene]
-        else: y_true = []
+        y_true = Y_true.get(gene, [])
         P = ancestors(graph, y_pred)
         T = ancestors(graph, y_true)
         numerator += len(P.intersection(T))
@@ -267,8 +266,7 @@ def Hrecall_micro(graph, Y_pred, Y_true):
     numerator = 0
     denominator = 0
     for gene, y_pred in Y_pred.items():
-        if gene in Y_true: y_true = Y_true[gene]
-        else: y_true = []
+        y_true = Y_true.get(gene, [])
         P = ancestors(graph, y_pred)
         T = ancestors(graph, y_true)
         numerator += len(P.intersection(T))
@@ -308,8 +306,7 @@ def Hprecision_macro(graph, Y_pred, Y_true):
     # Y_pred and Y_true are dictionaries whose keys are genes and values are lists of GO terms
     value = 0
     for gene, y_pred in Y_pred.items():
-        if gene in Y_true: y_true = Y_true[gene]
-        else: y_true = []
+        y_true = Y_true.get(gene, [])
         P = ancestors(graph, y_pred)
         T = ancestors(graph, y_true)
         value += len(P.intersection(T)) / len(P)
@@ -320,8 +317,7 @@ def Hrecall_macro(graph, Y_pred, Y_true):
     # Y_pred and Y_true are dictionaries whose keys are genes and values are lists of GO terms
     value = 0
     for gene, y_pred in Y_pred.items():
-        if gene in Y_true: y_true = Y_true[gene]
-        else: y_true = []
+        y_true = Y_true.get(gene, [])
         P = ancestors(graph, y_pred)
         T = ancestors(graph, y_true)
         value += len(P.intersection(T)) / len(T)
@@ -331,8 +327,7 @@ def Hrecall_macro(graph, Y_pred, Y_true):
 def HF1_macro(graph, Y_pred, Y_true):
     value = 0
     for gene, y_pred in Y_pred.items():
-        if gene in Y_true: y_true = Y_true[gene]
-        else: y_true = []
+        y_true = Y_true.get(gene, [])
         P = ancestors(graph, y_pred)
         T = ancestors(graph, y_true)
         P_inter_T = len(P.intersection(T))
@@ -416,7 +411,7 @@ if __name__ == '__main__':
                 'f1', 'rand_f1', 'perm_f1',
                 ]
         evaluation = evaluation[columns]
-        
+
         if not os.path.exists('./{}'.format(PATH)):
             os.mkdir('./{}'.format(PATH))
         if not os.path.exists('./{}/metrics'.format(PATH)):
