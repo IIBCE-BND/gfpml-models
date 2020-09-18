@@ -1,7 +1,11 @@
-import numpy as np
-import pandas as pd
-import os
 import networkx as nx
+import numpy as np
+import operator
+import os
+import pandas as pd
+
+import matplotlib
+matplotlib.use('agg')
 import matplotlib.pyplot as plt
 
 from parsers.obo import parse_obo
@@ -70,6 +74,7 @@ def posterior_correction(graph, prior_probs):
             P_par_0 = 1 - P_par_1
             P_child_0 = (1 - prior_probs[node]) * np.prod([1 - prior_probs[parent] for parent in parents])
             P_child_1 = 1 - P_child_0
+            
             if P_par_0 > P_child_1: pre_probs[node] = P_par_1
             else: pre_probs[node] = P_child_1
 
