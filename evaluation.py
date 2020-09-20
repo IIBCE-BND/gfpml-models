@@ -4,6 +4,7 @@ import os
 import networkx as nx
 from joblib import Parallel, delayed
 from tqdm import tqdm
+import matplotlib.pyplot as plt
 
 from parsers.obo import parse_obo
 

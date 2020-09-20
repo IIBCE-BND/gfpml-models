@@ -85,11 +85,11 @@ def calculate_enrichment(gene_pos, window_size):
 #                 test_data = {'pos':pos_test, 'gene_id':gene_test}
 #                 test_df = pd.DataFrame(data=test_data)
 
-#                 train_df.to_csv('{}/train.csv'.format(save_path), sep='\t')
-#                 test_df.to_csv('{}/test.csv'.format(save_path), sep='\t')
+#                 train_df.to_csv('{}/train.csv'.format(save_path), sep='\t', index=False)
+#                 test_df.to_csv('{}/test.csv'.format(save_path), sep='\t', index=False)
 
-#             go_annots_pos_train.to_csv('{}/{}_train.csv'.format(save_path, go_id), sep='\t')
-#             go_annots_pos_test.to_csv('{}/{}_test.csv'.format(save_path, go_id), sep='\t')
+#             go_annots_pos_train.to_csv('{}/{}_train.csv'.format(save_path, go_id), sep='\t', index=False)
+#             go_annots_pos_test.to_csv('{}/{}_test.csv'.format(save_path, go_id), sep='\t', index=False)
 
 
 #             seq_score[go_id] = score_function(seq_len, pos_train)
@@ -100,12 +100,94 @@ def calculate_enrichment(gene_pos, window_size):
 
 #         if len(seq_score) > 0:
 #             seq_score = pd.DataFrame(data=seq_score)
-#             seq_score.to_csv('{}/seq_score_{}.csv'.format(save_path, ontology), sep='\t')
+#             seq_score.to_csv('{}/seq_score_{}.csv'.format(save_path, ontology), sep='\t', index=False)
 
 #         for ws in window_sizes:
 #             if len(seq_lea_ontology[ws]) > 0:
 #                 seq_lea_ontology[ws] = pd.DataFrame(data=seq_lea_ontology[ws])
-#                 seq_lea_ontology[ws].to_csv('{}/seq_lea_{}_{}.csv'.format(save_path, ws, ontology), sep='\t')
+#                 seq_lea_ontology[ws].to_csv('{}/seq_lea_{}_{}.csv'.format(save_path, ws, ontology), sep='\t', index=False)
+
+
+def calculate_seq_lea_score2_parallelize(go_id, go_annots_train, organism_id, ontology, save_path_ont, len_chromosomes, window_sizes):
+    data = []
+    for seqname, seq_annots in go_annots_train.groupby('seqname'):
+        positions = list(seq_annots.pos.values)
+
+        seq_score = score_function(len_chromosomes[seqname], positions)
+        data_seq = {'pos': range(len_chromosomes[seqname]), 'seqname': seqname, 'score': seq_score}
+
+        mask_train = np.isin(range(len_chromosomes[seqname]), positions)
+        for ws in window_sizes:
+            seq_lea = calculate_enrichment(mask_train, ws)
+            data_seq['lea_{}'.format(ws)] = seq_lea
+        data_seq = pd.DataFrame(data_seq)
+        data.append(data_seq)
+    data = pd.concat(data)
+    columns = ['pos', 'seqname', 'score'] + ['lea_{}'.format(ws) for ws in window_sizes]
+    data = data[columns]
+    data.to_csv('{}/{}.csv'.format(save_path_ont, go_id), index=False, sep='\t')
+
+
+def calculate_seq_lea_score2(genome, expanded_annots, organism_id, window_sizes, th=100):
+    gene_identifier = get_gene_identifier(genome)
+    train_size = 0.8
+
+    save_path = '../datasets/processed/'
+    if not os.path.exists(save_path):
+        os.mkdir(save_path)
+    save_path = '{}/{}/'.format(save_path, organism_id)
+    if not os.path.exists(save_path):
+        os.mkdir(save_path)
+
+    len_chromosomes = dict(genome.groupby('seqname').size())
+
+    genome_train, genome_test, _, _ = train_test_split(genome, genome, train_size=train_size)
+    genome_train.to_csv('{}/genome_train.csv'.format(save_path), index=False, sep='\t')
+    genome_test.to_csv('{}/genome_test.csv'.format(save_path), index=False, sep='\t')
+
+    MIN_LIST_SIZE_TRAIN = 40
+    MIN_LIST_SIZE_TEST = 10
+
+    for ontology, exp_annots_ontology in expanded_annots.groupby('ontology'):
+        save_path_ont = '{}/{}/'.format(save_path, ontology)
+        if not os.path.exists(save_path_ont):
+            os.mkdir(save_path_ont)
+
+        annots_train = exp_annots_ontology[exp_annots_ontology.gene_id.isin(genome_train[gene_identifier])]
+        annots_test = exp_annots_ontology[exp_annots_ontology.gene_id.isin(genome_test[gene_identifier])]
+
+        grouped_train = annots_train.groupby('go_id')
+        grouped_test = annots_test.groupby('go_id')
+
+        # grouped_train = np.array(grouped_train)[np.array(grouped_train.size() >= th*train_size)]
+        grouped_train = np.array(grouped_train)[np.array(grouped_train.size() >= MIN_LIST_SIZE_TRAIN)]
+        # grouped_test = np.array(grouped_test)[np.array(grouped_test.size() >= th*(1 - train_size))]
+        grouped_test = np.array(grouped_test)[np.array(grouped_test.size() >= MIN_LIST_SIZE_TEST)]
+
+        gos_train, _ = zip(*grouped_train)
+        gos_test, _ = zip(*grouped_test)
+        gos_train, gos_test = set(gos_train), set(gos_test)
+        gos_inter = gos_train & gos_test
+        grouped_train = dict((go_id, go_annots) for (go_id, go_annots) in grouped_train if go_id in gos_inter)
+        grouped_test = dict((go_id, go_annots) for (go_id, go_annots) in grouped_test if go_id in gos_inter)
+
+        print(ontology, len(gos_inter), len(gos_inter) / len(exp_annots_ontology.groupby('go_id')))
+
+        annots_train = annots_train[annots_train['go_id'].isin(gos_inter)]
+        annots_test = annots_test[annots_test['go_id'].isin(gos_inter)]
+        annots_train.to_csv('{}/annots_train.csv'.format(save_path_ont), index=False, sep='\t')
+        annots_test.to_csv('{}/annots_test.csv'.format(save_path_ont), index=False, sep='\t')
+
+        Parallel(n_jobs=-1, verbose=10)(
+            delayed(calculate_seq_lea_score2_parallelize)(go_id,
+                                                          go_annots_train,
+                                                          organism_id,
+                                                          ontology,
+                                                          save_path_ont,
+                                                          len_chromosomes,
+                                                          window_sizes)
+            for go_id, go_annots_train in annots_train.groupby('go_id')
+        )
 
 
 def calculate_seq_lea_parallelize(go_id, go_annots_train, organism_id, ontology, save_path_ont, len_chromosomes, window_sizes):
