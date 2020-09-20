@@ -1,5 +1,6 @@
 import numpy as np
 import networkx as nx
+import matplotlib.pyplot as plt
 import pandas as pd
 import os
 
@@ -209,7 +210,7 @@ def calculate_seq_lea_parallelize(go_id, go_annots_train, organism_id, ontology,
     # columns = ['pos', 'seqname', 'score'] + ['lea_{}'.format(ws) for ws in window_sizes]
     columns = ['pos', 'seqname'] + ['lea_{}'.format(ws) for ws in window_sizes]
     data = data[columns]
-    data.to_csv('{}/{}.csv'.format(save_path_ont, go_id), sep='\t')
+    data.to_csv('{}/{}.csv'.format(save_path_ont, go_id), sep='\t', index=False)
 
 
 def calculate_seq_lea(genome, expanded_annots, organism_id, window_sizes, depths):
@@ -225,17 +226,14 @@ def calculate_seq_lea(genome, expanded_annots, organism_id, window_sizes, depths
     len_chromosomes = dict(genome.groupby('seqname').size())
 
     genome_train, genome_test, _, _ = train_test_split(genome, genome, train_size=train_size)
-    genome_train.to_csv('{}/genome_train.csv'.format(save_path), sep='\t')
-    genome_test.to_csv('{}/genome_test.csv'.format(save_path), sep='\t')
+    genome_train.to_csv('{}/genome_train.csv'.format(save_path), sep='\t', index=False)
+    genome_test.to_csv('{}/genome_test.csv'.format(save_path), sep='\t', index=False)
 
     MIN_LIST_SIZE_TRAIN = 40
     MIN_LIST_SIZE_TEST = 10
     MAX_DEPTH = 1000
 
     for ontology, exp_annots_ontology in expanded_annots.groupby('ontology'):
-        if ontology != 'biological_process':
-            continue
-        print(ontology)
         save_path_ont = '{}/{}/'.format(save_path, ontology)
         if not os.path.exists(save_path_ont):
             os.mkdir(save_path_ont)
@@ -269,8 +267,8 @@ def calculate_seq_lea(genome, expanded_annots, organism_id, window_sizes, depths
 
         annots_train = annots_train[annots_train['go_id'].isin(gos_inter)]
         annots_test = annots_test[annots_test['go_id'].isin(gos_inter)]
-        annots_train.to_csv('{}/annots_train.csv'.format(save_path_ont), sep='\t')
-        annots_test.to_csv('{}/annots_test.csv'.format(save_path_ont), sep='\t')
+        annots_train.to_csv('{}/annots_train.csv'.format(save_path_ont), sep='\t', index=False)
+        annots_test.to_csv('{}/annots_test.csv'.format(save_path_ont), sep='\t', index=False)
 
         Parallel(n_jobs=-1, verbose=10)(
             delayed(calculate_seq_lea_parallelize)(go_id,
@@ -314,7 +312,6 @@ if __name__ == '__main__':
     gos, ontology_gos, go_alt_ids, ontology_graphs = obo.parse_obo(ontology_path)
 
     for organism_id in os.listdir(data_path):
-        print(organism_id)
         directory = '{}/{}/'.format(data_path, organism_id)
 
         genome = pd.read_csv('{}/genome.csv'.format(directory), sep='\t')

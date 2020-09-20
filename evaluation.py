@@ -135,6 +135,8 @@ def posterior_correction_2(graph, prior_probs, root, graph_nodes):
         post_probs_aux = dict(zip(childrens, post_probs_aux))
 
         post_probs = {**post_probs, **post_probs_aux}
+        # for p in post_probs_aux:
+        #     post_probs[p] = post_probs_aux[p]
         visited_nodes = visited_nodes.union(set(childrens))
         childrens = [set(graph.predecessors(children)) for children in childrens]
         childrens = list(set.union(*childrens))
@@ -160,6 +162,8 @@ def posterior_correction_parallelize(graph, prior_probs, root, graph_nodes):
         post_probs_aux = dict(zip(childrens, post_probs_aux))
 
         post_probs = {**post_probs, **post_probs_aux}
+        # for p in post_probs_aux:
+        #     post_probs[p] = post_probs_aux[p]
         visited_nodes = visited_nodes.union(set(childrens))
         childrens = [set(graph.predecessors(children)) for children in childrens]
         childrens = list(set.union(*childrens))
@@ -420,7 +424,7 @@ if __name__ == '__main__':
 
         evaluation.to_csv('./{}/metrics/metrics_{}_{}.csv'.format(PATH, organism_id, ontology), sep='\t', index=True)
 
-    # evaluation2('results', 'mm', 'cellular_component')
+    # evaluation2('results', 'celegans', 'cellular_component')
 
     Parallel(n_jobs=-1, verbose=10)(delayed(evaluation2)(p[0], p[1], p[2]) for p in itertools.product(['complete'], ['mm'], ['biological_process']))
     # Parallel(n_jobs=-1, verbose=10)(delayed(evaluation2)(p[0], p[1], p[2]) for p in itertools.product(PATHS, ORGANISMS_ID, ONTOLOGIES))

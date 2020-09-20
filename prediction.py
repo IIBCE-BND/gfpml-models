@@ -6,72 +6,16 @@ import joblib
 
 import ast
 
+from model import find_root, siblings, closest_family, load_data
 import parsers.obo as obo
 
 from sklearn.ensemble import RandomForestClassifier
+from sklearn.metrics import precision_score
 
 ONTOLOGIES = ['biological_process', 'cellular_component', 'molecular_function']
 ORGANISMS_ID = ['scer', 'celegans', 'dmel', 'hg', 'mm']
 ontology_path = '../datasets/raw/obo/go-basic.obo'
 gos, ontology_gos, go_alt_ids, ontology_graphs = obo.parse_obo(ontology_path)
-
-def find_root(graph, node=None):
-    if node == None:
-        node = list(graph.nodes())[0]
-    parents = list(graph.successors(node))
-    if len(parents) == 0: return node
-    else: return find_root(graph, parents[0])
-
-def siblings(graph, node):
-    parents = list(graph.successors(node))
-    if len(parents) == 0: return {} # root node
-    else:
-        siblings_nodes = [set(list(graph.predecessors(node))) for node in parents]
-        siblings_nodes = set.union(*siblings_nodes)
-        if len(siblings_nodes) > 1:
-            return siblings_nodes - {node}
-        else:
-            return set.union(*[siblings(graph, node) for node in parents]) - set(parents) # without siblings
-
-def closest_family(graph, node):
-    parents = set(graph.successors(node))
-    childrens = set(graph.predecessors(node))
-    siblings = [set(list(graph.predecessors(node))) for node in parents] + [set(list(graph.successors(node))) for node in childrens]
-    siblings = set.union(*siblings)
-    closest = set(parents | childrens | siblings)
-    return closest
-
-def load_data(go_id, go_ids, ontology_subgraph, annots_train, annots_test, data_train, data_test, data):
-    closest_nodes = sorted(list(closest_family(ontology_subgraph, go_id)))
-    closest_mask = np.isin(go_ids, closest_nodes)
-    sibling_nodes = sorted(list(siblings(ontology_subgraph, go_id)))
-
-    y_train_true = annots_train['go_id'] == go_id
-    y_test_true = annots_test['go_id'] == go_id
-    y_train_false = annots_train['go_id'].isin(sibling_nodes)
-    y_test_false = annots_test['go_id'].isin(sibling_nodes)
-
-    index_train_true = annots_train[y_train_true].index.drop_duplicates()
-    index_train_false = annots_train[y_train_false & ~annots_train.index.isin(index_train_true)].index.drop_duplicates()
-    index_test_true = annots_test[y_test_true].index.drop_duplicates()
-    index_test_false = annots_test[y_test_false & ~annots_test.index.isin(index_test_true)].index.drop_duplicates()
-
-    index_train = index_train_true.append(index_train_false)
-    index_test = index_test_true.append(index_test_false)
-
-    X_train = np.array(data_train[data_train.index.isin(index_train)])
-    X_test = np.array(data_test[data_test.index.isin(index_test)])
-
-    times_to_repeat = int(X_train.shape[1] / closest_mask.shape[0])
-    closest_mask = np.repeat(closest_mask, times_to_repeat)
-    X = np.array(data)[:,closest_mask]
-    X_train = X_train[:,closest_mask]
-    X_test = X_test[:,closest_mask]
-
-    y_train = np.concatenate((np.ones_like(index_train_true, dtype='int'), np.zeros_like(index_train_false, dtype='int')), axis=None)
-    y_test = np.concatenate((np.ones_like(index_test_true, dtype='int'), np.zeros_like(index_test_false, dtype='int')), axis=None)
-    return X, X_train, y_train, X_test, y_test, index_train, index_test
-
 
 def prediction(organism_id, ontology, parameters):
     data_path = '../datasets/processed/{}/'.format(organism_id)
@@ -106,6 +50,7 @@ def prediction(organism_id, ontology, parameters):
     #     print(go_id, np.array(df.drop(['seqname'], axis=1)).sum())
 
     columns = ['pos', 'seqname', 'lea_5', 'lea_10', 'lea_20', 'lea_50', 'lea_100']
+    # columns = ['pos', 'seqname', 'lea_20']
     data = []
     for go_id in go_ids:
         df = pd.read_csv('{}/{}.csv'.format(data_path, go_id, dtype={'seqname':str}), sep='\t')[columns]

@@ -106,6 +106,7 @@ def model(organism_id, ontology):
     #     print(go_id, np.array(df.drop(['seqname'], axis=1)).sum())
 
     columns = ['pos', 'seqname', 'lea_5', 'lea_10', 'lea_20', 'lea_50', 'lea_100']
+    # columns = ['pos', 'seqname', 'lea_20']
     data = []
     for go_id in go_ids:
         df = pd.read_csv('{}/{}.csv'.format(data_path, go_id, dtype={'seqname':str}), sep='\t')[columns]
