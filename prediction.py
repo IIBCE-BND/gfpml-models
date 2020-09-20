@@ -4,17 +4,16 @@ import os
 import re
 import joblib
 
+import ast
+
 import parsers.obo as obo
 
 from sklearn.ensemble import RandomForestClassifier
-from sklearn.model_selection import GridSearchCV
-from sklearn.metrics import precision_score
 
+ONTOLOGIES = ['biological_process', 'cellular_component', 'molecular_function']
 ORGANISMS_ID = ['scer', 'celegans', 'dmel', 'hg', 'mm']
-ONTOLOGIES = ['cellular_component', 'molecular_function', 'biological_process']
 ontology_path = '../datasets/raw/obo/go-basic.obo'
 gos, ontology_gos, go_alt_ids, ontology_graphs = obo.parse_obo(ontology_path)
-
 
 def find_root(graph, node=None):
     if node == None:
@@ -22,7 +21,6 @@ def find_root(graph, node=None):
     parents = list(graph.successors(node))
     if len(parents) == 0: return node
     else: return find_root(graph, parents[0])
-
 
 def siblings(graph, node):
     parents = list(graph.successors(node))
@@ -35,7 +33,6 @@ def siblings(graph, node):
         else:
             return set.union(*[siblings(graph, node) for node in parents]) - set(parents) # without siblings
 
-
 def closest_family(graph, node):
     parents = set(graph.successors(node))
     childrens = set(graph.predecessors(node))
@@ -44,8 +41,7 @@ def closest_family(graph, node):
     closest = set(parents | childrens | siblings)
     return closest
 
-
-def load_data(go_id, go_ids, ontology_subgraph, annots_train, annots_test, data_train, data_test):
+def load_data(go_id, go_ids, ontology_subgraph, annots_train, annots_test, data_train, data_test, data):
     closest_nodes = sorted(list(closest_family(ontology_subgraph, go_id)))
     closest_mask = np.isin(go_ids, closest_nodes)
     sibling_nodes = sorted(list(siblings(ontology_subgraph, go_id)))
@@ -68,25 +64,29 @@ def load_data(go_id, go_ids, ontology_subgraph, annots_train, annots_test, data_
 
     times_to_repeat = int(X_train.shape[1] / closest_mask.shape[0])
     closest_mask = np.repeat(closest_mask, times_to_repeat)
+    X = np.array(data)[:,closest_mask]
     X_train = X_train[:,closest_mask]
     X_test = X_test[:,closest_mask]
 
     y_train = np.concatenate((np.ones_like(index_train_true, dtype='int'), np.zeros_like(index_train_false, dtype='int')), axis=None)
     y_test = np.concatenate((np.ones_like(index_test_true, dtype='int'), np.zeros_like(index_test_false, dtype='int')), axis=None)
+    return X, X_train, y_train, X_test, y_test, index_train, index_test
 
-    return X_train, y_train, X_test, y_test, index_train, index_test
 
-
-def model(organism_id, ontology):
+def prediction(organism_id, ontology, parameters):
     data_path = '../datasets/processed/{}/'.format(organism_id)
-    genome = pd.read_csv('../datasets/preprocessed/{}/genome.csv'.format(organism_id), dtype={'seqname':str}, sep='\t')
-    genome_train = pd.read_csv('{}/genome_train.csv'.format(data_path, organism_id), dtype={'seqname':str}, sep='\t')
-    genome_test = pd.read_csv('{}/genome_test.csv'.format(data_path, organism_id), dtype={'seqname':str}, sep='\t')
+    genome = pd.read_csv('../datasets/preprocessed/{}/genome.csv'.format(organism_id), sep='\t', dtype={'seqname':str})
+    if organism_id in ['hg', 'mm'] and ontology == 'biological_process':
+        genome_train = pd.read_csv('{}/genome_train_8020.csv'.format(data_path, organism_id), sep='\t', dtype={'seqname':str})
+        genome_test = pd.read_csv('{}/genome_test_8020.csv'.format(data_path, organism_id), sep='\t', dtype={'seqname':str})
+    else:
+        genome_train = pd.read_csv('{}/genome_train.csv'.format(data_path, organism_id), sep='\t', dtype={'seqname':str})
+        genome_test = pd.read_csv('{}/genome_test.csv'.format(data_path, organism_id), sep='\t', dtype={'seqname':str})
     len_chromosomes = dict(genome.groupby('seqname').size())
 
     data_path = '{}/{}/'.format(data_path, ontology)
-    annots_train = pd.read_csv('{}/annots_train.csv'.format(data_path), dtype={'seqname':str}, sep='\t')
-    annots_test = pd.read_csv('{}/annots_test.csv'.format(data_path), dtype={'seqname':str}, sep='\t')
+    annots_train = pd.read_csv('{}/annots_train.csv'.format(data_path), sep='\t', dtype={'seqname':str})
+    annots_test = pd.read_csv('{}/annots_test.csv'.format(data_path), sep='\t', dtype={'seqname':str})
 
     genome = genome.sort_values(by=['seqname', 'pos']).set_index(['seqname', 'pos'])
     genome_train = genome_train.sort_values(by=['seqname', 'pos']).set_index(['seqname', 'pos'])
@@ -137,15 +137,6 @@ def model(organism_id, ontology):
 
     # data = data.fillna(0) # no se porque aparecen nan ni donde, asi que se soluciona asi
 
-    # mask = np.array(data.isna()).sum(axis=0) > 0
-    # print(mask, np.repeat(go_ids, 3)[mask])
-
-    # print(np.array(data.isna()).shape)
-
-    # print(len(np.repeat(go_ids, 1)), len(data.columns), np.array(data.isna()).sum())
-    # print(list(zip(list(np.repeat(go_ids, 3)), list(np.array(data.isna()).sum(axis=0)))))
-    # print(list(zip(list(data.columns), np.array(data.isna()).sum(axis=0))))
-
     # data_train = data[data.index.isin(annots_train.index)]
     # data_test = data[data.index.isin(annots_test.index)]
 
@@ -153,36 +144,40 @@ def model(organism_id, ontology):
     data_test = data[data.index.isin(genome_test.index)]
 
     root = find_root(ontology_subgraph)
-    results = pd.DataFrame(index=index_test)
-    # random_results = pd.DataFrame(index=index_test)
-    scoring = 'f1'
-    parameters_file = open('parameters/{}_{}_{}.txt'.format(scoring, organism_id, ontology), 'w')
+    datas = data
+
+    results = pd.DataFrame(index=datas.index)
     for node in sorted(ontology_subgraph.nodes):
-        if node == root:
+        if node == root or node not in parameters:
             results[node] = 1
-            # random_results[node] = 1
-            parameters_file.write('{} \n'.format(node, 'ROOT'))
             continue
-        X_train, y_train, X_test, y_test, index_go_train, index_go_test = load_data(node, go_ids, ontology_subgraph, annots_train, annots_test, data_train, data_test)
+        X, X_train, y_train, X_test, y_test, index_go_train, index_go_test = load_data(node, go_ids, ontology_subgraph, annots_train, annots_test, data_train, data_test, datas)
 
         if y_train.mean() < 1.0:
-            parameters = {'max_depth': [6, 10], 'max_features': ['auto', 0.5], 'n_estimators':[300], 'random_state':[0]}
-            clf = GridSearchCV(RandomForestClassifier(), parameters, cv=3, scoring=scoring, n_jobs=-1)
+            param = parameters[node]
+            clf = RandomForestClassifier(
+                max_features=param['max_features'],
+                n_estimators=param['n_estimators'],
+                max_depth=param['max_depth'],
+                random_state=param['random_state'],
+                n_jobs=-1,
+            )
             clf.fit(X_train, y_train)
-            prior_probs = clf.predict_proba(X_test)[:,1]
-            # joblib.dump(model, 'models/{}/{}/{}_{}.joblib'.format(organism_id, ontology, scoring, node))
-            parameters_file.write('{} {} {}\n'.format(node, clf.best_params_, clf.score(X_test, y_test)))
+            prior_probs = clf.predict_proba(X)[:,1]
         else:
-            prior_probs = np.ones_like(y_test)
-            parameters_file.write('{} \n'.format(node, {}))
-        # prior_probs = np.random.uniform(0, 1, len(y_test))
-        results[node] = 0.0
-        # results.loc[index_go_test, node] = prior_probs
-        results[node][index_test.isin(index_go_test)] = prior_probs
+            prior_probs = np.ones_like(len(X))
+        # results[node] = 1.0
+        # results[node][index.isin(index_go_test)] = prior_probs
+        # results[node][index.isin(index_go_train)] = prior_probs_train
+        results[node] = prior_probs
 
-        # random_results[node] = 0.0
-        # random_results[node][index_test.isin(index_go_test)] = np.random.uniform(0, 1, len(y_test))
-    results.to_csv('results/results_model_{}_{}.csv'.format(organism_id, ontology), index=True, sep='\t')
-    # random_results.to_csv('random_results_model_{}_{}.csv'.format(organism_id, ontology), index=True, sep='\t')
+    results.to_csv('complete/complete_model_{}_{}.csv'.format(organism_id, ontology), index=True, sep='\t')
 
-model('celegans', 'cellular_component')
+m = re.compile('(GO:\d+)\s({.+})')
+for organism_id in ORGANISMS_ID:
+    for ontology in ONTOLOGIES:
+        print(organism_id, ontology)
+        fileObject = open('./parameters/f1_{}_{}.txt'.format(organism_id, ontology), 'r')
+        lines = fileObject.readlines()
+        parameters = {match.group(1): ast.literal_eval(match.group(2)) for match in map(lambda l: m.search(l), lines) if match}
+        prediction(organism_id, ontology, parameters)

@@ -1,10 +1,9 @@
 import numpy as np
 import networkx as nx
-import matplotlib.pyplot as plt
 import pandas as pd
 import os
 
-import matplotlib.pyplot as plt
+import parsers.obo as obo
 
 from itertools import chain
 from joblib import Parallel, delayed
@@ -14,10 +13,12 @@ from sklearn.metrics import pairwise_distances
 
 ONTOLOGIES = ['biological_process', 'cellular_component', 'molecular_function']
 
-def get_gene_identifier(genome):
-    if 'name' in genome.columns: gene_identifier = 'name'
-    elif 'id' in genome.columns: gene_identifier = 'id'
-    return gene_identifier
+def find_root(graph, node=None):
+    if node == None:
+        node = list(graph.nodes())[0]
+    parents = list(graph.successors(node))
+    if len(parents) == 0: return node
+    else: return find_root(graph, parents[0])
 
 def reshape_lea(gene_pos, window_size):
     n = len(gene_pos)
@@ -42,78 +43,79 @@ def calculate_enrichment(gene_pos, window_size):
     lea_array = (reshape_lea(gene_pos, window_size).sum(axis=1) / window_sizes) / (gene_pos.mean())
     return lea_array
 
-def calculate_seq_lea_score(seq_genes, seq_annots, organism_id, window_sizes, th=100):
-    gene_identifier = get_gene_identifier(seq_genes)
-    chromosome = seq_genes.seqname.values[0]
+# def calculate_seq_lea_score(seq_genes, seq_annots, organism_id, window_sizes, th=100):
+#     gene_identifier = get_gene_identifier(seq_genes)
+#     chromosome = seq_genes.seqname.values[0]
 
-    # seq_genes = seq_genes.sort_values(['start', 'strand', 'size'], ascending=True) # correct order
-    # seq_genes['pos'] = range(len(seq_genes))
-    seq_len = len(seq_genes)
+#     # seq_genes = seq_genes.sort_values(['start', 'strand', 'size'], ascending=True) # correct order
+#     # seq_genes['pos'] = range(len(seq_genes))
+#     seq_len = len(seq_genes)
 
-    train_size = 0.8
-    gene_train, gene_test, pos_train, pos_test = train_test_split(seq_genes[gene_identifier].values, seq_genes.pos.values, train_size=train_size)
+#     train_size = 0.8
+#     gene_train, gene_test, pos_train, pos_test = train_test_split(seq_genes[gene_identifier].values, seq_genes.pos.values, train_size=train_size)
 
-    for ontology, seq_annots_ontology in seq_annots.groupby('ontology'):
-        seq_lea_ontology = {window_size: {} for window_size in window_sizes}
-        seq_score = {}
-        for go_id, seq_annots_go in seq_annots_ontology.groupby('go_id'):
-            seq_annots_go['pos'] = seq_annots_go['gene_id'].replace(seq_genes.set_index(gene_identifier)['pos'].to_dict())
-            go_annots_pos = seq_annots_go[['gene_id', 'pos']]
+#     for ontology, seq_annots_ontology in seq_annots.groupby('ontology'):
+#         seq_lea_ontology = {window_size: {} for window_size in window_sizes}
+#         seq_score = {}
+#         for go_id, seq_annots_go in seq_annots_ontology.groupby('go_id'):
+#             seq_annots_go['pos'] = seq_annots_go['gene_id'].replace(seq_genes.set_index(gene_identifier)['pos'].to_dict())
+#             go_annots_pos = seq_annots_go[['gene_id', 'pos']]
 
-            go_annots_pos_train = go_annots_pos[go_annots_pos['pos'].isin(pos_train)].drop_duplicates()
-            go_annots_pos_test = go_annots_pos[go_annots_pos['pos'].isin(pos_test)].drop_duplicates()
+#             go_annots_pos_train = go_annots_pos[go_annots_pos['pos'].isin(pos_train)].drop_duplicates()
+#             go_annots_pos_test = go_annots_pos[go_annots_pos['pos'].isin(pos_test)].drop_duplicates()
 
-            if (len(seq_annots_go) < th) or (len(go_annots_pos_train) == 0) or (len(go_annots_pos_test) == 0):
-                continue
+#             if (len(seq_annots_go) < th) or (len(go_annots_pos_train) == 0) or (len(go_annots_pos_test) == 0):
+#                 continue
 
-            save_path = '../datasets/processed/'
-            if not os.path.exists(save_path):
-                os.mkdir(save_path)
+#             save_path = '../datasets/processed/'
+#             if not os.path.exists(save_path):
+#                 os.mkdir(save_path)
 
-            save_path = '{}/{}/'.format(save_path, organism_id)
-            if not os.path.exists(save_path):
-                os.mkdir(save_path)
+#             save_path = '{}/{}/'.format(save_path, organism_id)
+#             if not os.path.exists(save_path):
+#                 os.mkdir(save_path)
 
-            save_path = '{}/{}/'.format(save_path, chromosome)
-            if not os.path.exists(save_path):
-                os.mkdir(save_path)
+#             save_path = '{}/{}/'.format(save_path, chromosome)
+#             if not os.path.exists(save_path):
+#                 os.mkdir(save_path)
 
-            if not os.path.exists('{}/train.csv'.format(save_path)):
-                train_data = {'pos':pos_train, 'gene_id':gene_train}
-                train_df = pd.DataFrame(data=train_data)
-                test_data = {'pos':pos_test, 'gene_id':gene_test}
-                test_df = pd.DataFrame(data=test_data)
+#             if not os.path.exists('{}/train.csv'.format(save_path)):
+#                 train_data = {'pos':pos_train, 'gene_id':gene_train}
+#                 train_df = pd.DataFrame(data=train_data)
+#                 test_data = {'pos':pos_test, 'gene_id':gene_test}
+#                 test_df = pd.DataFrame(data=test_data)
 
-                train_df.to_csv('{}/train.csv'.format(save_path), sep='\t', index=False)
-                test_df.to_csv('{}/test.csv'.format(save_path), sep='\t', index=False)
+#                 train_df.to_csv('{}/train.csv'.format(save_path), sep='\t')
+#                 test_df.to_csv('{}/test.csv'.format(save_path), sep='\t')
 
-            go_annots_pos_train.to_csv('{}/{}_train.csv'.format(save_path, go_id), sep='\t', index=False)
-            go_annots_pos_test.to_csv('{}/{}_test.csv'.format(save_path, go_id), sep='\t', index=False)
-
-
-            seq_score[go_id] = score_function(seq_len, pos_train)
-
-            mask_train = np.isin(range(seq_len), pos_train)
-            for ws in window_sizes:
-                seq_lea_ontology[ws][go_id] = calculate_enrichment(mask_train, ws)
-
-        if len(seq_score) > 0:
-            seq_score = pd.DataFrame(data=seq_score)
-            seq_score.to_csv('{}/seq_score_{}.csv'.format(save_path, ontology), sep='\t', index=False)
-
-        for ws in window_sizes:
-            if len(seq_lea_ontology[ws]) > 0:
-                seq_lea_ontology[ws] = pd.DataFrame(data=seq_lea_ontology[ws])
-                seq_lea_ontology[ws].to_csv('{}/seq_lea_{}_{}.csv'.format(save_path, ws, ontology), sep='\t', index=False)
+#             go_annots_pos_train.to_csv('{}/{}_train.csv'.format(save_path, go_id), sep='\t')
+#             go_annots_pos_test.to_csv('{}/{}_test.csv'.format(save_path, go_id), sep='\t')
 
 
-def calculate_seq_lea_score2_parallelize(go_id, go_annots_train, organism_id, ontology, save_path_ont, len_chromosomes, window_sizes):
+#             seq_score[go_id] = score_function(seq_len, pos_train)
+
+#             mask_train = np.isin(range(seq_len), pos_train)
+#             for ws in window_sizes:
+#                 seq_lea_ontology[ws][go_id] = calculate_enrichment(mask_train, ws)
+
+#         if len(seq_score) > 0:
+#             seq_score = pd.DataFrame(data=seq_score)
+#             seq_score.to_csv('{}/seq_score_{}.csv'.format(save_path, ontology), sep='\t')
+
+#         for ws in window_sizes:
+#             if len(seq_lea_ontology[ws]) > 0:
+#                 seq_lea_ontology[ws] = pd.DataFrame(data=seq_lea_ontology[ws])
+#                 seq_lea_ontology[ws].to_csv('{}/seq_lea_{}_{}.csv'.format(save_path, ws, ontology), sep='\t')
+
+
+def calculate_seq_lea_parallelize(go_id, go_annots_train, organism_id, ontology, save_path_ont, len_chromosomes, window_sizes):
     data = []
     for seqname, seq_annots in go_annots_train.groupby('seqname'):
-        positions = list(seq_annots.pos.values)
+        positions = (seq_annots.reset_index(inplace=False)).pos.values
 
-        seq_score = score_function(len_chromosomes[seqname], positions)
-        data_seq = {'pos': range(len_chromosomes[seqname]), 'seqname': seqname, 'score': seq_score}
+        # seq_score = score_function(len_chromosomes[seqname], positions)
+        # data_seq = {'pos': range(len_chromosomes[seqname]), 'seqname': seqname, 'score': seq_score}
+        data_seq = {'pos': range(len_chromosomes[seqname]), 'seqname': seqname}
 
         mask_train = np.isin(range(len_chromosomes[seqname]), positions)
         for ws in window_sizes:
@@ -122,13 +124,13 @@ def calculate_seq_lea_score2_parallelize(go_id, go_annots_train, organism_id, on
         data_seq = pd.DataFrame(data_seq)
         data.append(data_seq)
     data = pd.concat(data)
-    columns = ['pos', 'seqname', 'score'] + ['lea_{}'.format(ws) for ws in window_sizes]
+    # columns = ['pos', 'seqname', 'score'] + ['lea_{}'.format(ws) for ws in window_sizes]
+    columns = ['pos', 'seqname'] + ['lea_{}'.format(ws) for ws in window_sizes]
     data = data[columns]
-    data.to_csv('{}/{}.csv'.format(save_path_ont, go_id), index=False, sep='\t')
+    data.to_csv('{}/{}.csv'.format(save_path_ont, go_id), sep='\t')
 
 
-def calculate_seq_lea_score2(genome, expanded_annots, organism_id, window_sizes, th=100):
-    gene_identifier = get_gene_identifier(genome)
+def calculate_seq_lea(genome, expanded_annots, organism_id, window_sizes, depths):
     train_size = 0.8
 
     save_path = '../datasets/processed/'
@@ -141,27 +143,38 @@ def calculate_seq_lea_score2(genome, expanded_annots, organism_id, window_sizes,
     len_chromosomes = dict(genome.groupby('seqname').size())
 
     genome_train, genome_test, _, _ = train_test_split(genome, genome, train_size=train_size)
-    genome_train.to_csv('{}/genome_train.csv'.format(save_path), index=False, sep='\t')
-    genome_test.to_csv('{}/genome_test.csv'.format(save_path), index=False, sep='\t')
+    genome_train.to_csv('{}/genome_train.csv'.format(save_path), sep='\t')
+    genome_test.to_csv('{}/genome_test.csv'.format(save_path), sep='\t')
 
     MIN_LIST_SIZE_TRAIN = 40
     MIN_LIST_SIZE_TEST = 10
+    MAX_DEPTH = 1000
 
     for ontology, exp_annots_ontology in expanded_annots.groupby('ontology'):
+        if ontology != 'biological_process':
+            continue
+        print(ontology)
         save_path_ont = '{}/{}/'.format(save_path, ontology)
         if not os.path.exists(save_path_ont):
             os.mkdir(save_path_ont)
 
-        annots_train = exp_annots_ontology[exp_annots_ontology.gene_id.isin(genome_train[gene_identifier])]
-        annots_test = exp_annots_ontology[exp_annots_ontology.gene_id.isin(genome_test[gene_identifier])]
+        annots_train = exp_annots_ontology[exp_annots_ontology.index.isin(genome_train.index)]
+        annots_test = exp_annots_ontology[exp_annots_ontology.index.isin(genome_test.index)]
 
         grouped_train = annots_train.groupby('go_id')
         grouped_test = annots_test.groupby('go_id')
 
-        # grouped_train = np.array(grouped_train)[np.array(grouped_train.size() >= th*train_size)]
-        grouped_train = np.array(grouped_train)[np.array(grouped_train.size() >= MIN_LIST_SIZE_TRAIN)]
-        # grouped_test = np.array(grouped_test)[np.array(grouped_test.size() >= th*(1 - train_size))]
-        grouped_test = np.array(grouped_test)[np.array(grouped_test.size() >= MIN_LIST_SIZE_TEST)]
+        # dephs_train = np.array([depths[go] for go,_ in grouped_train])
+        # dephs_test = np.array([depths[go] for go,_ in grouped_test])
+
+        grouped_train = np.array(grouped_train)[
+            np.array(grouped_train.size() >= MIN_LIST_SIZE_TRAIN)
+            # np.array(dephs_train <= MAX_DEPTH)
+        ]
+        grouped_test = np.array(grouped_test)[
+            np.array(grouped_test.size() >= MIN_LIST_SIZE_TEST)
+            # np.array(dephs_train <= MAX_DEPTH)
+        ]
 
         gos_train, _ = zip(*grouped_train)
         gos_test, _ = zip(*grouped_test)
@@ -174,11 +187,11 @@ def calculate_seq_lea_score2(genome, expanded_annots, organism_id, window_sizes,
 
         annots_train = annots_train[annots_train['go_id'].isin(gos_inter)]
         annots_test = annots_test[annots_test['go_id'].isin(gos_inter)]
-        annots_train.to_csv('{}/annots_train.csv'.format(save_path_ont), index=False, sep='\t')
-        annots_test.to_csv('{}/annots_test.csv'.format(save_path_ont), index=False, sep='\t')
+        annots_train.to_csv('{}/annots_train.csv'.format(save_path_ont), sep='\t')
+        annots_test.to_csv('{}/annots_test.csv'.format(save_path_ont), sep='\t')
 
         Parallel(n_jobs=-1, verbose=10)(
-            delayed(calculate_seq_lea_score2_parallelize)(go_id,
+            delayed(calculate_seq_lea_parallelize)(go_id,
                                                           go_annots_train,
                                                           organism_id,
                                                           ontology,
@@ -189,79 +202,56 @@ def calculate_seq_lea_score2(genome, expanded_annots, organism_id, window_sizes,
         )
 
 
-def score_function(num_genes_in_chromosome, positions):
-#     return score for every gen position
-    genes_positions_GO = np.array(positions).reshape(-1, 1)
-    distances = pairwise_distances(genes_positions_GO, genes_positions_GO, metric='l1')
-    distances = np.sort(distances, axis=1)
-    mean = distances.mean(axis=0)
-    # median = np.median(distances, axis=0)
+# def score_function(num_genes_in_chromosome, positions):
+# #     return score for every gen position
+#     genes_positions_GO = np.array(positions).reshape(-1, 1)
+#     distances = pairwise_distances(genes_positions_GO, genes_positions_GO, metric='l1')
+#     distances = np.sort(distances, axis=1)
+#     mean = distances.mean(axis=0)
+#     # median = np.median(distances, axis=0)
 
-    genes_positions = np.arange(num_genes_in_chromosome).reshape(-1, 1)
-    distances = pairwise_distances(genes_positions, genes_positions_GO, metric='l1')
-    norma = np.linalg.norm(np.sort(distances, axis=1) - mean, axis=1)
-    # norma = np.linalg.norm(np.sort(distances, axis=1) - median, axis=1)
+#     genes_positions = np.arange(num_genes_in_chromosome).reshape(-1, 1)
+#     distances = pairwise_distances(genes_positions, genes_positions_GO, metric='l1')
+#     norma = np.linalg.norm(np.sort(distances, axis=1) - mean, axis=1)
+#     # norma = np.linalg.norm(np.sort(distances, axis=1) - median, axis=1)
 
-    score = num_genes_in_chromosome / (num_genes_in_chromosome + norma)
+#     score = num_genes_in_chromosome / (num_genes_in_chromosome + norma)
 
-    return score
+#     return score
 
-def select_annots(annots, seq_genes):
-    gene_identifier = get_gene_identifier(seq_genes)
-    return annots[annots['gene_id'].isin(seq_genes[gene_identifier].values)]
-
+# def select_annots(annots, seq_genes):
+#     gene_identifier = get_gene_identifier(seq_genes)
+#     return annots[annots['gene_id'].isin(seq_genes[gene_identifier].values)]
 
 
 if __name__ == '__main__':
     data_path = '../datasets/preprocessed/'
+    ontology_path = '../datasets/raw/obo/go-basic.obo'
     window_sizes = [5, 10, 20, 50, 100]
-    window_sizes = [5, 100]
+
+    gos, ontology_gos, go_alt_ids, ontology_graphs = obo.parse_obo(ontology_path)
 
     for organism_id in os.listdir(data_path):
         print(organism_id)
         directory = '{}/{}/'.format(data_path, organism_id)
 
         genome = pd.read_csv('{}/genome.csv'.format(directory), sep='\t')
-        gene_identifier = get_gene_identifier(genome)
-
+        genome = genome.set_index(['pos', 'seqname'])
         expanded_annots = pd.read_csv('{}/expanded_annots.csv'.format(directory), sep='\t')
-        expanded_annots = expanded_annots[expanded_annots.gene_id.isin(genome[gene_identifier])]
+        expanded_annots = expanded_annots.set_index(['pos', 'seqname'])
 
-        calculate_seq_lea_score2(genome,
-                                expanded_annots,
-                                organism_id,
-                                window_sizes)
+        depths = {}
+        # for ontology, antology_annots in expanded_annots.groupby(['ontology']):
+        #     ontology_subgraph = ontology_graphs[ontology].subgraph(antology_annots.go_id.unique())
+        #     root = find_root(ontology_subgraph)
+        #     graph_distances = nx.shortest_path_length(ontology_subgraph,target=root)
+        #     depths = {**depths, **graph_distances}
+        
+        # expanded_annots['depths'] = expanded_annots['go_id'].map(depths)
 
-
-
-        ########## AFTER COMPUTE ##########
-        ###################################
-
-        # genome_train = pd.read_csv('../datasets/processed/{}/genome_train.csv'.format(organism_id), sep='\t')
-        # genome_test = pd.read_csv('../datasets/processed/{}/genome_test.csv'.format(organism_id), sep='\t')
-        # len_chromosomes = dict(genome.groupby('seqname').size())
-        # # print(len_chromosomes)
-
-        # for ontology in ONTOLOGIES:
-        #     print(ontology)
-        #     data_path = '../datasets/processed/{}/{}/'.format(organism_id, ontology)
-        #     annots_train = pd.read_csv('{}/annots_train.csv'.format(data_path), sep='\t')
-        #     annots_test = pd.read_csv('{}/annots_test.csv'.format(data_path), sep='\t')
-
-        #     go_ids = annots_train['go_id'].unique()
-        #     for go_id in go_ids:
-        #         mask_train = genome_train[['pos', 'seqname']].set_index(['pos', 'seqname'])
-        #         mask_test = genome_test[['pos', 'seqname']].set_index(['pos', 'seqname'])
-        #         data = []
-        #         for seqname in len_chromosomes:
-        #             df = pd.read_csv('{}/{}/{}.csv'.format(data_path, seqname, go_id), sep='\t')
-        #             data.append(df)
-
-        #         data = pd.concat(data)
-        #         data = data.set_index(['pos', 'seqname'])
-        #         data_train = data[data.index.isin(mask_train.index)]
-        #         data_test = data[data.index.isin(mask_test.index)]
-
-        #         data_train.to_csv('{}/{}_train.csv'.format(data_path, go_id), sep='\t', index=True)
-        #         data_test.to_csv('{}/{}_test.csv'.format(data_path, go_id), sep='\t', index=True)
+        calculate_seq_lea(genome,
+                          expanded_annots,
+                          organism_id,
+                          window_sizes,
+                          depths)
 
