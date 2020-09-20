@@ -10,12 +10,9 @@ import matplotlib.pyplot as plt
 
 from parsers.obo import parse_obo
 
-<<<<<<< HEAD
 from operator import itemgetter
 from joblib import Parallel, delayed
 from tqdm import tqdm
-=======
->>>>>>> ac0183c4b952d7c99892d860431ee4690ce3aa66
 
 def find_root(graph, node=None):
     if node == None:
