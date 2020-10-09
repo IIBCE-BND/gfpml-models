@@ -16,7 +16,7 @@ Parameters
 
 ## model
 
-Follow the implementation of the model described in [1] (https://pdfs.semanticscholar.org/44f1/4625bbcd74f364810e87dd115d17b4445bb2.pdf) and [2] (https://www.tandfonline.com/doi/pdf/10.1080/13102818.2018. 1521302? NeedAccess = true) with some variations.
+Follow the implementation of the model described in [1](https://pdfs.semanticscholar.org/44f1/4625bbcd74f364810e87dd115d17b4445bb2.pdf) and [2](https://www.tandfonline.com/doi/pdf/10.1080/13102818.2018.1521302?needAccess=true) with some variations.
 
 ## evaluation
 
