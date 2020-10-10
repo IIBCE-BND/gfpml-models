@@ -43,6 +43,7 @@ data_load = {
 
 gos, ontology_gos, go_alt_ids, ontology_graphs = obo.parse_obo(ontology_path)
 
+# generate genome, annotations and hierarchical annotations
 for organism_id in data_load:
     print(organism_id)
 

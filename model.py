@@ -17,6 +17,7 @@ gos, ontology_gos, go_alt_ids, ontology_graphs = obo.parse_obo(ontology_path)
 
 
 def find_root(graph, node=None):
+    # Find the root of the graph
     if node == None:
         node = list(graph.nodes())[0]
     parents = list(graph.successors(node))
@@ -37,6 +38,7 @@ def siblings(graph, node):
 
 
 def closest_family(graph, node):
+    # Return fathers, childrens and siblings of node in graph
     parents = set(graph.successors(node))
     childrens = set(graph.predecessors(node))
     siblings = [set(list(graph.predecessors(node))) for node in parents] + [set(list(graph.successors(node))) for node in childrens]

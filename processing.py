@@ -15,6 +15,7 @@ from sklearn.metrics import pairwise_distances
 ONTOLOGIES = ['biological_process', 'cellular_component', 'molecular_function']
 
 def find_root(graph, node=None):
+    # Find the root of the graph
     if node == None:
         node = list(graph.nodes())[0]
     parents = list(graph.successors(node))
@@ -22,6 +23,7 @@ def find_root(graph, node=None):
     else: return find_root(graph, parents[0])
 
 def reshape_lea(gene_pos, window_size):
+    # Function to compute LEA vectorized
     n = len(gene_pos)
     w = window_size
     ans = np.zeros((n, 2 * w + 1))
@@ -30,6 +32,7 @@ def reshape_lea(gene_pos, window_size):
     return ans
 
 def calculate_enrichment(gene_pos, window_size):
+    # Compute LEA using gene_pos for window_size
     n = len(gene_pos)
     w = window_size
     if w < n - 1:
@@ -192,6 +195,14 @@ def calculate_seq_lea_score2(genome, expanded_annots, organism_id, window_sizes,
 
 
 def calculate_seq_lea_parallelize(go_id, go_annots_train, organism_id, ontology, save_path_ont, len_chromosomes, window_sizes):
+    '''
+    Compute LEA for go_id using annotations in go_annots_train for each window_size in window_sizes.
+        go_id: GO term to compute LEA
+        go_annots_train: annotations of go_id
+        save_path_ont: path to save LEA
+        len_chromosomes: dictionary of chromosomes and length of this chromosome in genome
+        window_sizes: window_sizes for compute LEA
+    '''
     data = []
     for seqname, seq_annots in go_annots_train.groupby('seqname'):
         positions = (seq_annots.reset_index(inplace=False)).pos.values
@@ -214,6 +225,13 @@ def calculate_seq_lea_parallelize(go_id, go_annots_train, organism_id, ontology,
 
 
 def calculate_seq_lea(genome, expanded_annots, organism_id, window_sizes, depths):
+    '''
+    Split genome and expanded_annots in train and test sets and compute LEA for GO terms with annotations in training set of 
+    expanded_annots for each window_size in window_sizes.
+        genome: genome for organism_id
+        expanded_annots: hierarchical annotations
+        window_sizes: window_sizes for compute LEA
+    '''
     train_size = 0.8
 
     save_path = '../datasets/processed/'
@@ -271,14 +289,15 @@ def calculate_seq_lea(genome, expanded_annots, organism_id, window_sizes, depths
         annots_test.to_csv('{}/annots_test.csv'.format(save_path_ont), sep='\t', index=False)
 
         Parallel(n_jobs=-1, verbose=10)(
-            delayed(calculate_seq_lea_parallelize)(go_id,
-                                                          go_annots_train,
-                                                          organism_id,
-                                                          ontology,
-                                                          save_path_ont,
-                                                          len_chromosomes,
-                                                          window_sizes)
-            for go_id, go_annots_train in annots_train.groupby('go_id')
+            delayed(calculate_seq_lea_parallelize)(
+                go_id,
+                go_annots_train,
+                organism_id,
+                ontology,
+                save_path_ont,
+                len_chromosomes,
+                window_sizes
+            ) for go_id, go_annots_train in annots_train.groupby('go_id')
         )
 
 
