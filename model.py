@@ -18,7 +18,7 @@ gos, ontology_gos, go_alt_ids, ontology_graphs = obo.parse_obo(ontology_path)
 
 def find_root(graph, node=None):
     # Find the root of the graph
-    if node == None:
+    if node is None:
         node = list(graph.nodes())[0]
     parents = list(graph.successors(node))
     if len(parents) == 0: return node

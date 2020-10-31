@@ -13,7 +13,7 @@ import itertools
 
 def find_root(graph, node=None):
     # Find the root of the graph
-    if node == None:
+    if node is None:
         node = list(graph.nodes())[0]
     parents = list(graph.successors(node))
     if len(parents) == 0: return node
@@ -21,7 +21,7 @@ def find_root(graph, node=None):
 
 
 def show_graph(graph, pos=None, with_labels=True, node_color='blue'):
-    if pos == None:
+    if pos is None:
         pos = {}
         root = find_root(graph)
         bfs = [(root, 0.0, 0.0, 2*np.pi)]
@@ -146,9 +146,7 @@ def posterior_correction_2(graph, prior_probs, root, graph_nodes):
     childrens = list(graph.predecessors(node))
     visited_nodes = set({root})
     while len(childrens) > 0:
-        post_probs_aux = [post_probs_parallelize(node, graph, pre_probs[node], post_probs) for node in childrens]
-        post_probs_aux = dict(zip(childrens, post_probs_aux))
-
+        post_probs_aux = {node: post_probs_parallelize(node, graph, pre_probs[node], post_probs) for node in childrens}
         post_probs = {**post_probs, **post_probs_aux}
         # for p in post_probs_aux:
         #     post_probs[p] = post_probs_aux[p]
@@ -191,7 +189,6 @@ def evaluate(prediction, graph, threshold=0.3):
     data_post = []
     GO_terms = list(prediction.columns)
     preds = {}
-    pos = None
     root = find_root(graph)
     graph_nodes = list(graph.nodes)
     graph_nodes.remove(root)
@@ -234,7 +231,6 @@ def evaluate2(prediction, graph, thresholds):
     data_post = []
     GO_terms = list(prediction.columns)
     preds = {th:{} for th in thresholds}
-    pos = None
     root = find_root(graph)
     graph_nodes = list(graph.nodes)
     graph_nodes.remove(root)
@@ -433,8 +429,9 @@ def hmetrics(graph, Y_pred, Y_true):
 
 
 def saveEvals(PATH, organism_id, ontology, ontology_graphs):
-    results = pd.read_csv('./{}/{}_model_{}_{}.csv'.format(PATH, PATH, organism_id, ontology), sep='\t', dtype={'seqname':str}).set_index(['pos', 'seqname'])
-    # random_results = pd.read_csv('random_results_model_{}_{}.csv'.format(organism_id, ontology), sep='\t', dtype={'seqname':str}).set_index(['pos', 'seqname'])
+    results = pd.read_csv('./{}/{}_model_{}_{}.csv'.format(PATH, PATH, organism_id, ontology), sep='\t', dtype={'seqname':str}).sort_values(['seqname', 'pos']).set_index(['seqname', 'pos'])
+    results = results.reindex(sorted(results.columns), axis=1)
+    # random_results = pd.read_csv('random_results_model_{}_{}.csv'.format(organism_id, ontology), sep='\t', dtype={'seqname':str}).set_index(['seqname', 'pos'])
 
     go_ids = results.columns.tolist()
     ontology_subgraph = ontology_graphs[ontology].subgraph(go_ids)
@@ -455,6 +452,7 @@ def saveEvals(PATH, organism_id, ontology, ontology_graphs):
     thresholds = ['0.1', '0.2', '0.3', '0.4', '0.5', '0.6', '0.7', '0.8', '0.9', '0.95']
 
     post_results, preds = evaluate2(results, ontology_subgraph, thresholds)
+
     random_post_results, random_preds = evaluate2(random_results, ontology_subgraph, thresholds)
     permutation_post_results, permutation_preds = evaluate2(random_permutation, ontology_subgraph, thresholds)
 
@@ -467,7 +465,7 @@ def saveEvals(PATH, organism_id, ontology, ontology_graphs):
     # random_post_results.to_csv('random_post_results.csv', sep='\t', index=True)
 
     annots_test = pd.read_csv('../datasets/processed/{}/{}/annots_test.csv'.format(organism_id, ontology), sep='\t', dtype={'seqname':str})
-    true_annots = {(pos, chromosome):list(set(df['go_id'].values)) for (pos, chromosome), df in annots_test.groupby(['pos', 'seqname'])}
+    true_annots = {(chromosome, pos):list(set(df['go_id'].values)) for (chromosome, pos), df in annots_test.groupby(['seqname', 'pos'])}
 
     metrics_results = hmetrics(ontology_subgraph, preds, true_annots)
     metrics_random = hmetrics(ontology_subgraph, random_preds, true_annots)
