@@ -1,6 +1,6 @@
 import numpy as np
 import networkx as nx
-import matplotlib.pyplot as plt
+# import matplotlib.pyplot as plt
 import pandas as pd
 import os
 from joblib import Parallel, delayed
@@ -46,6 +46,7 @@ gos, ontology_gos, go_alt_ids, ontology_graphs = obo.parse_obo(ontology_path)
 # generate genome, annotations and hierarchical annotations
 for organism_id in data_load:
     print(organism_id)
+    print(organism_id)
 
     genome = gtf.parse_gtf(data_load[organism_id]['gtf'], data_load[organism_id]['centromere'])
     annots = annot.parse_annot(data_load[organism_id]['gaf'], go_alt_ids)
@@ -70,13 +71,16 @@ for organism_id in data_load:
         print(ontology)
         annots_ontology = annots[annots['go_id'].isin(ontology_gos[ontology])]
         expanded_annots_ontology = annot.expand_annots(annots_ontology, ontology_graphs[ontology])
+        expanded_annots_ontology = expanded_annots_ontology.sort_values(['seqname', 'pos', 'go_id'])
         expanded_annots_ontology.to_csv('{}/{}_{}.csv'.format(directory, 'expanded_annots', ontology),
                                         sep='\t',
                                         index=False)
         expanded_annots_ontology['ontology'] = ontology
         expanded_annots.append(expanded_annots_ontology)
-    expanded_annots = pd.concat(expanded_annots)
+    expanded_annots = pd.concat(expanded_annots).sort_values(['seqname', 'pos', 'go_id'])
     expanded_annots.to_csv('{}/{}.csv'.format(directory, 'expanded_annots'), sep='\t', index=False)
 
+    genome = genome.sort_values(['seqname', 'pos'])
     genome.to_csv('{}/{}.csv'.format(directory, 'genome'), sep='\t', index=False)
+    annots = annots.sort_values(['seqname', 'pos', 'go_id'])
     annots.to_csv('{}/{}.csv'.format(directory, 'annots'), sep='\t', index=False)

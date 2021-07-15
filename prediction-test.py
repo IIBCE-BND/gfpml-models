@@ -81,18 +81,16 @@ def prediction(organism_id, ontology, parameters):
     # data_train = data[data.index.isin(annots_train.index)]
     # data_test = data[data.index.isin(annots_test.index)]
 
-    data_train = data[data.index.isin(genome_train.index)]
-    data_test = data[data.index.isin(genome_test.index)]
+    data_train = data[data.index.isin(index_train)]
+    data_test = data[data.index.isin(index_test)]
 
     root = find_root(ontology_subgraph)
-    datas = data
-
-    results = pd.DataFrame(index=datas.index)
+    results = pd.DataFrame(index=index_test)
     for node in sorted(ontology_subgraph.nodes):
         if node == root or node not in parameters:
             results[node] = 1
             continue
-        X, X_train, y_train, X_test, y_test, index_go_train, index_go_test = load_data(node, go_ids, ontology_subgraph, annots_train, annots_test, data_train, data_test, datas)
+        X, X_train, y_train, X_test, y_test, index_go_train, index_go_test = load_data(node, go_ids, ontology_subgraph, annots_train, annots_test, data_train, data_test, test=data_test)
 
         if y_train.mean() < 1.0:
             param = parameters[node]
@@ -112,11 +110,15 @@ def prediction(organism_id, ontology, parameters):
         # results[node][index.isin(index_go_train)] = prior_probs_train
         results[node] = prior_probs
 
-    results.to_csv('complete/complete_model_{}_{}.csv'.format(organism_id, ontology), index=True, sep='\t')
+    results.to_csv('prediction_test/test_model_{}_{}.csv'.format(organism_id, ontology), index=True, sep='\t')
 
 m = re.compile('(GO:\d+)\s({.+})')
 for organism_id in ORGANISMS_ID:
     for ontology in ONTOLOGIES:
+        if organism_id != 'mm':
+            continue
+        # if ontology != 'cellular_component':
+        #     continue
         print(organism_id, ontology)
         fileObject = open('./parameters/f1_{}_{}.txt'.format(organism_id, ontology), 'r')
         lines = fileObject.readlines()

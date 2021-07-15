@@ -4,7 +4,7 @@ import os
 import networkx as nx
 from joblib import Parallel, delayed
 from tqdm import tqdm
-import matplotlib.pyplot as plt
+# import matplotlib.pyplot as plt
 
 from parsers.obo import parse_obo
 
@@ -48,61 +48,17 @@ def show_graph(graph, pos=None, with_labels=True, node_color='blue'):
 
 def check_sanity(graph, probs):
     '''
-    Check if probs is coherent with hierarchy in graph
+    Check if probs is coherent with graph's hierarchy
         graph: graph of the ontology
         probs: dictionary of GO terms and their probabilities
     '''
-    root = find_root(graph)
     ans = True
     for node in graph:
-        if node == root:
-            continue
         parents = list(graph.successors(node))
         ans = ans and all([probs[node] <= probs[parent] for parent in parents])
+        if not ans:
+            return ans
     return ans
-
-
-def posterior_correction(graph, prior_probs):
-    '''
-    Given the graph of the ontology and the prior probabilities return the probabilities after hierarchical corrections
-    '''
-    # preliminary_probs
-    root = find_root(graph)
-    pre_probs = {}
-    for node in graph:
-        if node == root:
-            pre_probs[node] = prior_probs[node]
-        else:
-            parents = graph.successors(node)
-            if len(list(parents)) == 0:
-                raise ValueError('All this nodes have parents')
-            P_par_1 = prior_probs[node] * np.prod([prior_probs[parent] for parent in parents])
-            P_par_0 = 1 - P_par_1
-            P_child_0 = (1 - prior_probs[node]) * np.prod([1 - prior_probs[parent] for parent in parents])
-            P_child_1 = 1 - P_child_0
-            if P_par_0 > P_child_1: pre_probs[node] = P_par_1
-            else: pre_probs[node] = P_child_1
-
-    # posterior_correction
-    post_probs = {}
-    def posterior_correction_aux(graph, visited_nodes=set({}), node=root):
-        if len(visited_nodes) < len(graph):
-            if node == root:
-                post_probs[node] = pre_probs[node]
-            else:
-                parents = list(graph.successors(node))
-                min_posterior_probs_parents = np.amin([post_probs[parent] for parent in parents])
-                post_probs[node] = np.amin([pre_probs[node], min_posterior_probs_parents])
-            visited_nodes.add(node)
-            childrens = list(graph.predecessors(node))
-            for children in childrens:
-                parents_children = set(graph.successors(children))
-                if parents_children.issubset(visited_nodes):
-                    posterior_correction_aux(graph, visited_nodes, node=children)
-
-    posterior_correction_aux(graph)
-
-    return post_probs
 
 
 def pre_probs_parallelize(node, graph, prior_probs):
@@ -126,10 +82,9 @@ def post_probs_parallelize(node, graph, pre_probs_node, post_probs):
     return np.amin([pre_probs_node, min_posterior_probs_parents])
 
 
-def posterior_correction_2(graph, prior_probs, root, graph_nodes):
+def posterior_correction(graph, prior_probs, root, graph_nodes):
     '''
     Given the graph of the ontology and the prior probabilities return the probabilities after hierarchical corrections.
-    This is a faster version of posterior_correction.
     '''
     # preliminary_probs
     # pre_probs = [pre_probs_parallelize(node, graph, prior_probs) for node in graph_nodes]
@@ -147,9 +102,11 @@ def posterior_correction_2(graph, prior_probs, root, graph_nodes):
     visited_nodes = set({root})
     while len(childrens) > 0:
         post_probs_aux = {node: post_probs_parallelize(node, graph, pre_probs[node], post_probs) for node in childrens}
-        post_probs = {**post_probs, **post_probs_aux}
-        # for p in post_probs_aux:
-        #     post_probs[p] = post_probs_aux[p]
+        # post_probs = {**post_probs, **post_probs_aux}
+        for p in post_probs_aux:
+            # if p in post_probs:
+            #     raise Exception('p in post_probs', p, post_probs)
+            post_probs[p] = post_probs_aux[p]
         visited_nodes = visited_nodes.union(set(childrens))
         childrens = [set(graph.predecessors(children)) for children in childrens]
         childrens = list(set.union(*childrens))
@@ -158,76 +115,7 @@ def posterior_correction_2(graph, prior_probs, root, graph_nodes):
     return post_probs
 
 
-def posterior_correction_parallelize(graph, prior_probs, root, graph_nodes):
-    # preliminary_probs
-    pre_probs = Parallel(n_jobs=-1, verbose=10)(delayed(pre_probs_parallelize)(node, graph, prior_probs) for node in graph_nodes)
-    pre_probs = dict(zip(graph_nodes, pre_probs))
-    pre_probs[root] = prior_probs[root]
-
-    # # posterior_correction
-    post_probs = {}
-    post_probs[root] = pre_probs[root]
-    node = root
-    childrens = list(graph.predecessors(node))
-    visited_nodes = set({root})
-    while len(childrens) > 0:
-        post_probs_aux = Parallel(n_jobs=-1, verbose=10)(delayed(post_probs_parallelize)(node, graph, pre_probs[node], post_probs) for node in childrens)
-        post_probs_aux = dict(zip(childrens, post_probs_aux))
-
-        post_probs = {**post_probs, **post_probs_aux}
-        # for p in post_probs_aux:
-        #     post_probs[p] = post_probs_aux[p]
-        visited_nodes = visited_nodes.union(set(childrens))
-        childrens = [set(graph.predecessors(children)) for children in childrens]
-        childrens = list(set.union(*childrens))
-        childrens = [children for children in childrens if set(graph.successors(children)).issubset(visited_nodes)]
-
-    return post_probs
-
-
-def evaluate(prediction, graph, threshold=0.3):
-    data_post = []
-    GO_terms = list(prediction.columns)
-    preds = {}
-    root = find_root(graph)
-    graph_nodes = list(graph.nodes)
-    graph_nodes.remove(root)
-    for index, row in tqdm(list(prediction.iterrows())):
-        probs = list(row)
-        prior_probs = dict(zip(GO_terms, probs))
-        post_probs = posterior_correction_2(graph, prior_probs, root, graph_nodes)
-        _, probs = zip(*sorted(post_probs.items(), key=itemgetter(0)))
-        data_post.append(probs)
-
-        preds[index] = [node for node in GO_terms if post_probs[node] >= threshold]
-
-        # # ckeck if old posterior_correction is equal to the new one
-        # # si comentas los ifs de las lineas 67 y 101, entonces post_probs y post_probs_old no van a ser iguales
-        # post_probs_old = posterior_correction(graph, prior_probs)
-        # post_probs_values = np.array(list(post_probs.values()))
-        # post_probs_old_values = np.array(list(post_probs_old.values()))
-        # if (post_probs != post_probs_old):
-        #     _, probs_old = zip(*sorted(post_probs_old.items(), key=lambda x:x[0]))
-        #     print('NOT EQUAL', np.sum(post_probs_values == 0) != (len(post_probs_values) - 1), np.sum(post_probs_old_values == 0) != (len(post_probs_old_values) - 1), (np.array(probs_old) <= np.array(probs)).mean(), np.mean(probs_old))
-        # else:
-        #     print(np.sum(post_probs_values == 0) != (len(post_probs_values) - 1))
-
-
-        #     if post_probs[node] > threshold:
-        #         color_map.append('blue')
-        #     else: color_map.append('green')
-        # pos = show_graph(graph, pos=pos, with_labels=True, node_color=color_map)
-
-        # print(index, check_sanity(graph, post_probs))
-
-    data_post = np.array(data_post)
-
-    post_results = pd.DataFrame(data=data_post, columns=prediction.columns, index=prediction.index)
-
-    return post_results, preds
-
-
-def evaluate2(prediction, graph, thresholds):
+def evaluate(prediction, graph, thresholds):
     data_post = []
     GO_terms = list(prediction.columns)
     preds = {th:{} for th in thresholds}
@@ -237,7 +125,7 @@ def evaluate2(prediction, graph, thresholds):
     for index, row in tqdm(list(prediction.iterrows())):
         probs = list(row)
         prior_probs = dict(zip(GO_terms, probs))
-        post_probs = posterior_correction_2(graph, prior_probs, root, graph_nodes)
+        post_probs = posterior_correction(graph, prior_probs, root, graph_nodes)
         _, probs = zip(*sorted(post_probs.items(), key=itemgetter(0)))
         data_post.append(probs)
 
@@ -246,7 +134,7 @@ def evaluate2(prediction, graph, thresholds):
 
     data_post = np.array(data_post)
 
-    post_results = pd.DataFrame(data=data_post, columns=prediction.columns, index=prediction.index)
+    post_results = pd.DataFrame(data=data_post, columns=GO_terms, index=prediction.index)
 
     return post_results, preds
 
@@ -264,204 +152,92 @@ def ancestors(graph, y_pred):
     return ans
 
 
-# def Hprecision_micro(graph, Y_pred, Y_true):
-#     # Y_pred and Y_true are dictionaries whose keys are genes and values are lists of GO terms
-#     numerator = 0
-#     denominator = 0
-#     root = find_root(graph)
-#     for gene, y_pred in Y_pred.items():
-#         y_pred.append(root) # ensure that root belog to y_pred
-#         # y_true = Y_true.get(gene, [root]) # ensure that root belog to y_true
-#         y_true = Y_true.get(gene, [])
-#         P = ancestors(graph, y_pred)
-#         T = ancestors(graph, y_true)
-#         numerator += len(P.intersection(T))
-#         denominator += len(P)
-#     return numerator / denominator
-
-
-# def Hrecall_micro(graph, Y_pred, Y_true):
-#     # Y_pred and Y_true are dictionaries whose keys are genes and values are lists of GO terms
-#     numerator = 0
-#     denominator = 0
-#     root = find_root(graph)
-#     for gene, y_pred in Y_pred.items():
-#         y_pred.append(root) # ensure that root belog to y_pred
-#         # y_true = Y_true.get(gene, [root]) # ensure that root belog to y_true
-#         y_true = Y_true.get(gene, [])
-#         P = ancestors(graph, y_pred)
-#         T = ancestors(graph, y_true)
-#         numerator += len(P.intersection(T))
-#         denominator += len(T)
-#     return numerator / denominator
-
-
-# def HF1_micro(graph, Y_pred, Y_true):
-#     hprec = Hprecision_micro(graph, Y_pred, Y_true)
-#     hrec = Hrecall_micro(graph, Y_pred, Y_true)
-#     return (2 * hprec * hrec) / (hprec + hrec)
-
-
-# def metrics_micro(graph, Y_pred, Y_true):
-#     numerator = 0
-#     denominator1 = 0
-#     denominator2 = 0
-#     root = find_root(graph)
-#     res = {th:[] for th in Y_pred}
-#     for th in Y_pred:
-#         for gene, y_pred in Y_pred[th].items():
-#             y_pred.append(root) # ensure that root belog to y_pred
-#             # y_true = Y_true.get(gene, [root]) # ensure that root belog to y_true
-#             y_true = Y_true.get(gene, [])
-#             P = ancestors(graph, y_pred)
-#             T = ancestors(graph, y_true)
-#             numerator += len(P.intersection(T))
-#             denominator2 += len(T)
-#             denominator1 += len(P)
-#         hprec = numerator / denominator1
-#         hrec = numerator / denominator2
-#         hf1 = (2 * hprec * hrec) / (hprec + hrec)
-#         res[th] = [hprec, hrec, hf1]
-
-#     return res
-
-
-# def Hprecision_macro(graph, Y_pred, Y_true):
-#     # Y_pred and Y_true are dictionaries whose keys are genes and values are lists of GO terms
-#     value = 0
-#     root = find_root(graph)
-#     for gene, y_pred in Y_pred.items():
-#         y_pred.append(root) # ensure that root belog to y_pred
-#         # y_true = Y_true.get(gene, [root]) # ensure that root belog to y_true
-#         y_true = Y_true.get(gene, [])
-#         P = ancestors(graph, y_pred)
-#         T = ancestors(graph, y_true)
-#         value += len(P.intersection(T)) / len(P)
-#     return value / len(Y_pred)
-
-
-# def Hrecall_macro(graph, Y_pred, Y_true):
-#     # Y_pred and Y_true are dictionaries whose keys are genes and values are lists of GO terms
-#     value = 0
-#     root = find_root(graph)
-#     for gene, y_pred in Y_pred.items():
-#         y_pred.append(root) # ensure that root belog to y_pred
-#         # y_true = Y_true.get(gene, [root]) # ensure that root belog to y_true
-#         y_true = Y_true.get(gene, [])
-#         P = ancestors(graph, y_pred)
-#         T = ancestors(graph, y_true)
-#         value += len(P.intersection(T)) / len(T)
-#     return value / len(Y_pred)
-
-
-# def HF1_macro(graph, Y_pred, Y_true):
-#     value = 0
-#     root = find_root(graph)
-#     for gene, y_pred in Y_pred.items():
-#         y_pred.append(root) # ensure that root belog to y_pred
-#         # y_true = Y_true.get(gene, [root]) # ensure that root belog to y_true
-#         y_true = Y_true.get(gene, [])
-#         P = ancestors(graph, y_pred)
-#         T = ancestors(graph, y_true)
-#         # P_inter_T = len(P.intersection(T))
-#         # value += ( 2 * (P_inter_T**2) / (len(P) * len(T)) ) / ( (P_inter_T / len(P)) + (P_inter_T / len(T)) )
-#         value +=  2 * len(P.intersection(T)) / (len(P) + len(T))
-#     return value / len(Y_pred)
-
-
-# def metrics_macro(graph, Y_pred, Y_true):
-#     hPrec = 0
-#     hRec = 0
-#     hF1 = 0
-#     root = find_root(graph)
-#     res = {th:[] for th in Y_pred}
-#     for th in Y_pred:
-#         for gene, y_pred in Y_pred[th].items():
-#             y_pred.append(root) # ensure that root belog to y_pred
-#             # y_true = Y_true.get(gene, [root]) # ensure that root belog to y_true
-#             y_true = Y_true.get(gene, [])
-#             P = ancestors(graph, y_pred)
-#             T = ancestors(graph, y_true)
-#             P_inter_T = len(P.intersection(T))
-#             hPrec += P_inter_T / len(P)
-#             hRec += P_inter_T / len(T)
-#             hF1 += 2 * P_inter_T / (len(P) + len(T))
-#         hPrec = hPrec / len(Y_pred)
-#         hRec = hRec / len(Y_pred)
-#         hF1 = hF1 / len(Y_pred)
-#         res[th] = [hPrec, hRec, hF1]
-
-#     return res
-
-
 def hmetrics(graph, Y_pred, Y_true):
-    numerator = 0
-    denominator1 = 0
-    denominator2 = 0
-    hPrec = 0
-    hRec = 0
-    hF1 = 0
     root = find_root(graph)
     res = {th:[] for th in Y_pred}
     for th in Y_pred:
+        numerator = 0
+        denominator1 = 0
+        denominator2 = 0
+        # hPrec = 0
+        # hRec = 0
+        # hF1 = 0
         for gene, y_pred in Y_pred[th].items():
             y_pred.append(root) # ensure that root belog to y_pred
             # y_true = Y_true.get(gene, [root]) # ensure that root belog to y_true
             y_true = Y_true.get(gene, [])
-            P = ancestors(graph, y_pred)
+            P = ancestors(graph, y_pred) # set(P) should be equal to set(y_pred)
+            # if set(P) != set(y_pred):
+            #     print('NOT', gene)
             T = ancestors(graph, y_true)
             P_inter_T = len(P.intersection(T))
             numerator += P_inter_T
             denominator2 += len(T)
             denominator1 += len(P)
-            hPrec += P_inter_T / len(P)
-            hRec += P_inter_T / len(T)
-            hF1 += 2 * P_inter_T / (len(P) + len(T))
+            # hPrec += P_inter_T / len(P)
+            # hRec += P_inter_T / len(T)
+            # hF1 += 2 * P_inter_T / (len(P) + len(T))
         hprec = numerator / denominator1
         hrec = numerator / denominator2
         hf1 = (2 * hprec * hrec) / (hprec + hrec)
-        hPrec = hPrec / len(Y_pred)
-        hRec = hRec / len(Y_pred)
-        hF1 = hF1 / len(Y_pred)
-        res[th] = [hprec, hrec, hf1, hPrec, hRec, hF1]
+        # hPrec = hPrec / len(Y_pred)
+        # hRec = hRec / len(Y_pred)
+        # hF1 = hF1 / len(Y_pred)
+        # res[th] = [hprec, hrec, hf1, hPrec, hRec, hF1]
+        res[th] = [hprec, hrec, hf1]
 
     return res
 
 
 def saveEvals(PATH, organism_id, ontology, ontology_graphs):
     results = pd.read_csv('./{}/{}_model_{}_{}.csv'.format(PATH, PATH, organism_id, ontology), sep='\t', dtype={'seqname':str}).sort_values(['seqname', 'pos']).set_index(['seqname', 'pos'])
-    results = results.reindex(sorted(results.columns), axis=1)
+    # results = pd.read_csv('results_model_celegans_cellular_component.csv', sep='\t', dtype={'seqname':str}).sort_values(['seqname', 'pos']).set_index(['seqname', 'pos'])
     # random_results = pd.read_csv('random_results_model_{}_{}.csv'.format(organism_id, ontology), sep='\t', dtype={'seqname':str}).set_index(['seqname', 'pos'])
+    results = results.reindex(sorted(results.columns), axis=1)
 
     go_ids = results.columns.tolist()
     ontology_subgraph = ontology_graphs[ontology].subgraph(go_ids)
 
-    # post_results, preds = evaluate(results, ontology_subgraph, threshold=0.3)
-    # random_post_results, random_preds = evaluate(random_results, ontology_subgraph, threshold=0.3)
-
-    random_results = np.random.uniform(size=results.shape)*(results != 0)
-    random_results = pd.DataFrame(random_results, columns=results.columns, index=results.index)
-
-    flatten = np.array(results).flatten()
-    ind = np.argwhere(flatten != 0)
-    ind2 = np.random.permutation(ind)
-    flatten.flat[ind] = flatten[ind2]
-    random_permutation = flatten.reshape(-1, results.shape[1])
-    random_permutation = pd.DataFrame(random_permutation, columns=results.columns, index=results.index)
-
     thresholds = ['0.1', '0.2', '0.3', '0.4', '0.5', '0.6', '0.7', '0.8', '0.9', '0.95']
-
-    post_results, preds = evaluate2(results, ontology_subgraph, thresholds)
-
-    random_post_results, random_preds = evaluate2(random_results, ontology_subgraph, thresholds)
-    permutation_post_results, permutation_preds = evaluate2(random_permutation, ontology_subgraph, thresholds)
-
+    post_results, preds = evaluate(results, ontology_subgraph, thresholds)
     if not os.path.exists('./{}'.format(PATH)):
         os.mkdir('./{}'.format(PATH))
     if not os.path.exists('./{}/post'.format(PATH)):
         os.mkdir('./{}/post'.format(PATH))
 
     post_results.to_csv('./{}/post/post_results_{}_{}.csv'.format(PATH, organism_id, ontology), sep='\t', index=True)
+
+    # random_results = np.random.uniform(size=results.shape)*(results != 0)
+    # random_results = pd.DataFrame(random_results, columns=results.columns, index=results.index)
+
+    # flatten = np.array(results).flatten()
+    # ind = np.argwhere(flatten != 0)
+    # ind2 = np.random.permutation(ind)
+    # flatten.flat[ind] = flatten[ind2]
+    # random_permutation = flatten.reshape(-1, results.shape[1])
+    # random_permutation = pd.DataFrame(random_permutation, columns=results.columns, index=results.index)
+
+    random_results = np.random.uniform(size=results.shape)
+    random_results = pd.DataFrame(random_results, columns=results.columns, index=results.index)
+
+    def shuffle(X):
+        [np.random.shuffle(x) for x in X]
+
+    shuffledInRows = np.copy(results)
+    shuffle(shuffledInRows)
+
+    shuffledInColumns = np.copy(results)
+    shuffle(shuffledInColumns.T)
+
+    # random_permutation = pd.DataFrame(array, columns=results.columns, index=results.index)
+    random_rows = pd.DataFrame(shuffledInRows, columns=results.columns, index=results.index)
+    random_columns = pd.DataFrame(shuffledInColumns, columns=results.columns, index=results.index)
+
+    random_post_results, random_preds = evaluate(random_results, ontology_subgraph, thresholds)
+    # _, permutation_preds = evaluate(random_permutation, ontology_subgraph, thresholds)
+    _, permutation_rows = evaluate(random_rows, ontology_subgraph, thresholds)
+    _, permutation_columns = evaluate(random_columns, ontology_subgraph, thresholds)
+
     # random_post_results.to_csv('random_post_results.csv', sep='\t', index=True)
 
     annots_test = pd.read_csv('../datasets/processed/{}/{}/annots_test.csv'.format(organism_id, ontology), sep='\t', dtype={'seqname':str})
@@ -469,52 +245,65 @@ def saveEvals(PATH, organism_id, ontology, ontology_graphs):
 
     metrics_results = hmetrics(ontology_subgraph, preds, true_annots)
     metrics_random = hmetrics(ontology_subgraph, random_preds, true_annots)
-    metrics_permutation = hmetrics(ontology_subgraph, permutation_preds, true_annots)
+    # metrics_permutation = hmetrics(ontology_subgraph, permutation_preds, true_annots)
+    metrics_rows = hmetrics(ontology_subgraph, permutation_rows, true_annots)
+    metrics_columns = hmetrics(ontology_subgraph, permutation_columns, true_annots)
 
-    evaluation = []
-    for th in thresholds:
-        metrics = list(itertools.chain.from_iterable([metrics_results[th], metrics_random[th], metrics_permutation[th]]))        
-        evaluation.append(metrics)
+    for shuffle in ['row', 'column']:
+        if shuffle == 'row':
+            metrics_permutation = metrics_rows
+        elif shuffle == 'column':
+            metrics_permutation = metrics_columns
 
-    columns = [
-        # 'prec', 'recall', 'f1',
-        # 'rand_prec', 'rand_recall', 'rand_f1',
-        # 'perm_prec', 'perm_recall', 'perm_f1',
-        'precm', 'recallm', 'f1m', 'precM', 'recallM', 'f1M',
-        'rand_precm', 'rand_recallm', 'rand_f1m', 'rand_precM', 'rand_recallM', 'rand_f1M',
-        'perm_precm', 'perm_recallm', 'perm_f1m' 'perm_precM', 'perm_recallM', 'perm_f1M',
-    ]
-    evaluation = np.array(evaluation)
-    evaluation = pd.DataFrame(evaluation, columns=columns, index=thresholds)
+        evaluation = []
+        for th in thresholds:
+            metrics = list(itertools.chain.from_iterable([metrics_results[th], metrics_random[th], metrics_permutation[th]]))        
+            evaluation.append(metrics)
 
-    columns = [
-        # 'prec', 'rand_prec', 'perm_prec',
-        # 'recall', 'rand_recall', 'perm_recall',
-        # 'f1', 'rand_f1', 'perm_f1',
-        'precm', 'rand_precm', 'perm_precm', 'precM', 'rand_precM', 'perm_precM',
-        'recallm', 'rand_recallm', 'perm_recallm', 'recallM', 'rand_recallM', 'perm_recallM',
-        'f1m', 'rand_f1m', 'perm_f1m', 'f1M', 'rand_f1M', 'perm_f1M',
-    ]
+        columns = [
+            'prec', 'recall', 'f1',
+            'rand_prec', 'rand_recall', 'rand_f1',
+            'perm_prec', 'perm_recall', 'perm_f1',
+            # 'precm', 'recallm', 'f1m', 'precM', 'recallM', 'f1M',
+            # 'rand_precm', 'rand_recallm', 'rand_f1m', 'rand_precM', 'rand_recallM', 'rand_f1M',
+            # 'perm_precm', 'perm_recallm', 'perm_f1m' 'perm_precM', 'perm_recallM', 'perm_f1M',
+        ]
+        evaluation = np.array(evaluation)
+        evaluation = pd.DataFrame(evaluation, columns=columns)
+        evaluation['threshold'] = thresholds
 
-    evaluation = evaluation[columns]
+        columns = [
+            'threshold',
+            'prec', 'rand_prec', 'perm_prec',
+            'recall', 'rand_recall', 'perm_recall',
+            'f1', 'rand_f1', 'perm_f1',
+            # 'precm', 'rand_precm', 'perm_precm', 'precM', 'rand_precM', 'perm_precM',
+            # 'recallm', 'rand_recallm', 'perm_recallm', 'recallM', 'rand_recallM', 'perm_recallM',
+            # 'f1m', 'rand_f1m', 'perm_f1m', 'f1M', 'rand_f1M', 'perm_f1M',
+        ]
 
-    if not os.path.exists('./{}'.format(PATH)):
-        os.mkdir('./{}'.format(PATH))
-    if not os.path.exists('./{}/metrics'.format(PATH)):
-        os.mkdir('./{}/metrics'.format(PATH))
+        evaluation = evaluation[columns]
 
-    evaluation.to_csv('./{}/metrics/metrics_{}_{}.csv'.format(PATH, organism_id, ontology), sep='\t', index=True)
+        if not os.path.exists('./{}'.format(PATH)):
+            os.mkdir('./{}'.format(PATH))
+        if not os.path.exists('./{}/{}_metrics'.format(PATH, shuffle)):
+            os.mkdir('./{}/{}_metrics'.format(PATH, shuffle))
+
+        evaluation.to_csv('./{}/{}_metrics/metrics_{}_{}.csv'.format(PATH, shuffle, organism_id, ontology), sep='\t', index=False)
 
 
 if __name__ == '__main__':
     ontology_path = '../datasets/raw/obo/go-basic.obo'
+    # ontology_path = '/home/dsilvera/Drive/iibce/workspace/datasets/go-basic.obo'
     gos, ontology_gos, go_alt_ids, ontology_graphs = parse_obo(ontology_path)
 
     PATHS = ['results', 'complete']
     ORGANISMS_ID = ['scer', 'celegans', 'dmel', 'hg', 'mm']
     ONTOLOGIES = ['cellular_component', 'molecular_function', 'biological_process']
 
-    saveEvals('results', 'celegans', 'cellular_component', ontology_graphs)
+    PATHS = ['results']
+    PATHS = ['results', 'test']
 
-    # Parallel(n_jobs=-1, verbose=10)(delayed(saveEvals)(p[0], p[1], p[2]) for p in itertools.product(['results'], ['mm'], ['biological_process']))
-    # Parallel(n_jobs=-1, verbose=10)(delayed(saveEvals)(p[0], p[1], p[2]) for p in itertools.product(PATHS, ORGANISMS_ID, ONTOLOGIES))
+    # saveEvals('test', 'celegans', 'cellular_component', ontology_graphs)
+
+    Parallel(n_jobs=-1, verbose=10)(delayed(saveEvals)(p[0], p[1], p[2], ontology_graphs) for p in itertools.product(PATHS, ORGANISMS_ID, ONTOLOGIES))

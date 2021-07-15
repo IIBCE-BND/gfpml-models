@@ -1,6 +1,6 @@
 import numpy as np
 import networkx as nx
-import matplotlib.pyplot as plt
+# import matplotlib.pyplot as plt
 import pandas as pd
 import os
 
@@ -129,6 +129,7 @@ def calculate_seq_lea_score2_parallelize(go_id, go_annots_train, organism_id, on
     data = pd.concat(data)
     columns = ['pos', 'seqname', 'score'] + ['lea_{}'.format(ws) for ws in window_sizes]
     data = data[columns]
+    data = data.sort_values(['seqname', 'pos'])
     data.to_csv('{}/{}.csv'.format(save_path_ont, go_id), index=False, sep='\t')
 
 
@@ -146,6 +147,8 @@ def calculate_seq_lea_score2(genome, expanded_annots, organism_id, window_sizes,
     len_chromosomes = dict(genome.groupby('seqname').size())
 
     genome_train, genome_test, _, _ = train_test_split(genome, genome, train_size=train_size)
+    genome_train = genome_train.sort_values(['seqname', 'pos'])
+    genome_test = genome_test.sort_values(['seqname', 'pos'])
     genome_train.to_csv('{}/genome_train.csv'.format(save_path), index=False, sep='\t')
     genome_test.to_csv('{}/genome_test.csv'.format(save_path), index=False, sep='\t')
 
@@ -179,6 +182,8 @@ def calculate_seq_lea_score2(genome, expanded_annots, organism_id, window_sizes,
 
         annots_train = annots_train[annots_train['go_id'].isin(gos_inter)]
         annots_test = annots_test[annots_test['go_id'].isin(gos_inter)]
+        annots_train = annots_train.sort_values(['seqname', 'pos'])
+        annots_test = annots_test.sort_values(['seqname', 'pos'])
         annots_train.to_csv('{}/annots_train.csv'.format(save_path_ont), index=False, sep='\t')
         annots_test.to_csv('{}/annots_test.csv'.format(save_path_ont), index=False, sep='\t')
 
@@ -221,16 +226,17 @@ def calculate_seq_lea_parallelize(go_id, go_annots_train, organism_id, ontology,
     # columns = ['pos', 'seqname', 'score'] + ['lea_{}'.format(ws) for ws in window_sizes]
     columns = ['pos', 'seqname'] + ['lea_{}'.format(ws) for ws in window_sizes]
     data = data[columns]
+    data = data.sort_values(['seqname', 'pos'])
     data.to_csv('{}/{}.csv'.format(save_path_ont, go_id), sep='\t', index=False)
 
 
 def calculate_seq_lea(genome, expanded_annots, organism_id, window_sizes, depths):
     '''
-    Split genome and expanded_annots in train and test sets and compute LEA for GO terms with annotations in training set of 
+    Split genome and expanded_annots into train and test sets and compute LEA for GO terms with annotations in training set of 
     expanded_annots for each window_size in window_sizes.
         genome: genome for organism_id
         expanded_annots: hierarchical annotations
-        window_sizes: window_sizes for compute LEA
+        window_sizes: window_sizes to compute LEA
     '''
     train_size = 0.8
 
@@ -244,8 +250,10 @@ def calculate_seq_lea(genome, expanded_annots, organism_id, window_sizes, depths
     len_chromosomes = dict(genome.groupby('seqname').size())
 
     genome_train, genome_test, _, _ = train_test_split(genome, genome, train_size=train_size)
-    genome_train.to_csv('{}/genome_train.csv'.format(save_path), sep='\t', index=False)
-    genome_test.to_csv('{}/genome_test.csv'.format(save_path), sep='\t', index=False)
+    genome_train = genome_train.sort_values(['seqname', 'pos']).set_index(['seqname', 'pos'])
+    genome_test = genome_test.sort_values(['seqname', 'pos']).set_index(['seqname', 'pos'])
+    genome_train.to_csv('{}/genome_train.csv'.format(save_path), sep='\t', index=True)
+    genome_test.to_csv('{}/genome_test.csv'.format(save_path), sep='\t', index=True)
 
     MIN_LIST_SIZE_TRAIN = 40
     MIN_LIST_SIZE_TEST = 10
@@ -262,6 +270,8 @@ def calculate_seq_lea(genome, expanded_annots, organism_id, window_sizes, depths
         grouped_train = annots_train.groupby('go_id')
         grouped_test = annots_test.groupby('go_id')
 
+        print('GROUPED 1', len(grouped_train), len(grouped_test))
+
         # dephs_train = np.array([depths[go] for go,_ in grouped_train])
         # dephs_test = np.array([depths[go] for go,_ in grouped_test])
 
@@ -274,6 +284,11 @@ def calculate_seq_lea(genome, expanded_annots, organism_id, window_sizes, depths
             # np.array(dephs_train <= MAX_DEPTH)
         ]
 
+        print('GROUPED 2', len(grouped_train), len(grouped_test))
+
+        # gos_train are GO terms in genome_train with at least MIN_LIST_SIZE_TRAIN annotations
+        # gos_test are GO terms in genome_test with at least MIN_LIST_SIZE_TEST annotations
+        # gos_inter is the intersection of this two sets
         gos_train, _ = zip(*grouped_train)
         gos_test, _ = zip(*grouped_test)
         gos_train, gos_test = set(gos_train), set(gos_test)
@@ -281,12 +296,14 @@ def calculate_seq_lea(genome, expanded_annots, organism_id, window_sizes, depths
         grouped_train = dict((go_id, go_annots) for (go_id, go_annots) in grouped_train if go_id in gos_inter)
         grouped_test = dict((go_id, go_annots) for (go_id, go_annots) in grouped_test if go_id in gos_inter)
 
-        print(ontology, len(gos_inter), len(gos_inter) / len(exp_annots_ontology.groupby('go_id')))
+        print('GROUPED 3', len(grouped_train), len(grouped_test))
+
+        print('INTER', ontology, len(gos_inter), len(gos_inter) / len(exp_annots_ontology.groupby('go_id')))
 
         annots_train = annots_train[annots_train['go_id'].isin(gos_inter)]
         annots_test = annots_test[annots_test['go_id'].isin(gos_inter)]
-        annots_train.to_csv('{}/annots_train.csv'.format(save_path_ont), sep='\t', index=False)
-        annots_test.to_csv('{}/annots_test.csv'.format(save_path_ont), sep='\t', index=False)
+        annots_train.to_csv('{}/annots_train.csv'.format(save_path_ont), sep='\t', index=True)
+        annots_test.to_csv('{}/annots_test.csv'.format(save_path_ont), sep='\t', index=True)
 
         Parallel(n_jobs=-1, verbose=10)(
             delayed(calculate_seq_lea_parallelize)(
@@ -333,10 +350,8 @@ if __name__ == '__main__':
     for organism_id in os.listdir(data_path):
         directory = '{}/{}/'.format(data_path, organism_id)
 
-        genome = pd.read_csv('{}/genome.csv'.format(directory), sep='\t')
-        genome = genome.set_index(['pos', 'seqname'])
-        expanded_annots = pd.read_csv('{}/expanded_annots.csv'.format(directory), sep='\t')
-        expanded_annots = expanded_annots.set_index(['pos', 'seqname'])
+        genome = pd.read_csv('{}/genome.csv'.format(directory), sep='\t', dtype={'seqname': str}).sort_values(['seqname', 'pos'])#.set_index(['seqname', 'pos'])
+        expanded_annots = pd.read_csv('{}/expanded_annots.csv'.format(directory), sep='\t', dtype={'seqname': str}).sort_values(['seqname', 'pos', 'go_id']).set_index(['seqname', 'pos'])
 
         depths = {}
         # for ontology, antology_annots in expanded_annots.groupby(['ontology']):
