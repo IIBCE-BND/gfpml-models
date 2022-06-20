@@ -1,9 +1,5 @@
-import numpy as np
-import networkx as nx
-# import matplotlib.pyplot as plt
 import pandas as pd
 import os
-from joblib import Parallel, delayed
 
 import parsers.annot as annot
 import parsers.gtf as gtf
@@ -45,8 +41,6 @@ gos, ontology_gos, go_alt_ids, ontology_graphs = obo.parse_obo(ontology_path)
 
 # generate genome, annotations and hierarchical annotations
 for organism_id in data_load:
-    print(organism_id)
-    print(organism_id)
 
     genome = gtf.parse_gtf(data_load[organism_id]['gtf'], data_load[organism_id]['centromere'])
     annots = annot.parse_annot(data_load[organism_id]['gaf'], go_alt_ids)

@@ -167,8 +167,6 @@ def hmetrics(graph, Y_pred, Y_true):
             # y_true = Y_true.get(gene, [root]) # ensure that root belog to y_true
             y_true = Y_true.get(gene, [])
             P = ancestors(graph, y_pred) # set(P) should be equal to set(y_pred)
-            # if set(P) != set(y_pred):
-            #     print('NOT', gene)
             T = ancestors(graph, y_true)
             P_inter_T = len(P.intersection(T))
             numerator += P_inter_T

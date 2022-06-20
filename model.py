@@ -1,14 +1,11 @@
 import numpy as np
 import pandas as pd
 import os
-import re
-import joblib
 
 import parsers.obo as obo
 
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import GridSearchCV
-from sklearn.metrics import precision_score
 
 ORGANISMS_ID = ['scer', 'celegans', 'dmel', 'hg', 'mm']
 ONTOLOGIES = ['cellular_component', 'molecular_function', 'biological_process']
@@ -113,10 +110,6 @@ def model(organism_id, ontology):
     go_ids = sorted(annots_train['go_id'].unique())
     ontology_subgraph = ontology_graphs[ontology].subgraph(go_ids)
 
-    # for go_id in go_ids:
-    #     df = pd.read_csv('{}/{}.csv'.format(data_path, go_id), sep='\t', dtype={'seqname': str})
-    #     # print(go_id, np.array(df.drop(['seqname'], axis=1)).sum())
-
     columns = ['seqname', 'pos', 'lea_5', 'lea_10', 'lea_20', 'lea_50', 'lea_100']
     data = []
     for go_id in go_ids:
@@ -190,9 +183,7 @@ ONTOLOGIES = ['cellular_component', 'molecular_function', 'biological_process']
 for organism_id in ORGANISMS_ID:
     for ontology in ONTOLOGIES:
         if os.path.exists('./results/results_model_{}_{}.csv'.format(organism_id, ontology)):
-            print('YA ESTA', organism_id, ontology)
             continue
-        print(organism_id, ontology)
         model(organism_id, ontology)
 
 # model('celegans', 'cellular_component')

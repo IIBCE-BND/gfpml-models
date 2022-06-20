@@ -1,16 +1,11 @@
 import numpy as np
-import networkx as nx
-# import matplotlib.pyplot as plt
 import pandas as pd
 import os
 
 import parsers.obo as obo
 
-from itertools import chain
 from joblib import Parallel, delayed
-from tqdm import tqdm
 from sklearn.model_selection import train_test_split
-from sklearn.metrics import pairwise_distances
 
 ONTOLOGIES = ['biological_process', 'cellular_component', 'molecular_function']
 
@@ -178,8 +173,6 @@ def calculate_seq_lea_score2(genome, expanded_annots, organism_id, window_sizes,
         grouped_train = dict((go_id, go_annots) for (go_id, go_annots) in grouped_train if go_id in gos_inter)
         grouped_test = dict((go_id, go_annots) for (go_id, go_annots) in grouped_test if go_id in gos_inter)
 
-        print(ontology, len(gos_inter), len(gos_inter) / len(exp_annots_ontology.groupby('go_id')))
-
         annots_train = annots_train[annots_train['go_id'].isin(gos_inter)]
         annots_test = annots_test[annots_test['go_id'].isin(gos_inter)]
         annots_train = annots_train.sort_values(['seqname', 'pos'])
@@ -270,8 +263,6 @@ def calculate_seq_lea(genome, expanded_annots, organism_id, window_sizes, depths
         grouped_train = annots_train.groupby('go_id')
         grouped_test = annots_test.groupby('go_id')
 
-        print('GROUPED 1', len(grouped_train), len(grouped_test))
-
         # dephs_train = np.array([depths[go] for go,_ in grouped_train])
         # dephs_test = np.array([depths[go] for go,_ in grouped_test])
 
@@ -284,8 +275,6 @@ def calculate_seq_lea(genome, expanded_annots, organism_id, window_sizes, depths
             # np.array(dephs_train <= MAX_DEPTH)
         ]
 
-        print('GROUPED 2', len(grouped_train), len(grouped_test))
-
         # gos_train are GO terms in genome_train with at least MIN_LIST_SIZE_TRAIN annotations
         # gos_test are GO terms in genome_test with at least MIN_LIST_SIZE_TEST annotations
         # gos_inter is the intersection of this two sets
@@ -295,10 +284,6 @@ def calculate_seq_lea(genome, expanded_annots, organism_id, window_sizes, depths
         gos_inter = gos_train & gos_test
         grouped_train = dict((go_id, go_annots) for (go_id, go_annots) in grouped_train if go_id in gos_inter)
         grouped_test = dict((go_id, go_annots) for (go_id, go_annots) in grouped_test if go_id in gos_inter)
-
-        print('GROUPED 3', len(grouped_train), len(grouped_test))
-
-        print('INTER', ontology, len(gos_inter), len(gos_inter) / len(exp_annots_ontology.groupby('go_id')))
 
         annots_train = annots_train[annots_train['go_id'].isin(gos_inter)]
         annots_test = annots_test[annots_test['go_id'].isin(gos_inter)]
@@ -367,4 +352,3 @@ if __name__ == '__main__':
                           organism_id,
                           window_sizes,
                           depths)
-

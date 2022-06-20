@@ -1,17 +1,13 @@
 import numpy as np
 import pandas as pd
-import os
 import re
-import joblib
 
 import ast
 
-from model import find_root, siblings, closest_family, load_data
+from model import find_root, load_data
 import parsers.obo as obo
 
 from sklearn.ensemble import RandomForestClassifier
-from sklearn.metrics import precision_score
-
 ONTOLOGIES = ['biological_process', 'cellular_component', 'molecular_function']
 ORGANISMS_ID = ['scer', 'celegans', 'dmel', 'hg', 'mm']
 ontology_path = '../datasets/raw/obo/go-basic.obo'
@@ -40,10 +36,6 @@ def prediction(organism_id, ontology, parameters):
 
     go_ids = sorted(list(annots_train['go_id'].unique()))
     ontology_subgraph = ontology_graphs[ontology].subgraph(go_ids)
-
-    # for go_id in go_ids:
-    #     df = pd.read_csv('{}/{}.csv'.format(data_path, go_id), sep='\t', dtype={'seqname': str})
-    #     print(go_id, np.array(df.drop(['seqname'], axis=1)).sum())
 
     columns = ['seqname', 'pos', 'lea_5', 'lea_10', 'lea_20', 'lea_50', 'lea_100']
     # columns = ['seqname', 'pos', 'lea_20']
@@ -115,11 +107,6 @@ def prediction(organism_id, ontology, parameters):
 m = re.compile('(GO:\d+)\s({.+})')
 for organism_id in ORGANISMS_ID:
     for ontology in ONTOLOGIES:
-        if organism_id != 'mm':
-            continue
-        # if ontology != 'cellular_component':
-        #     continue
-        print(organism_id, ontology)
         fileObject = open('./parameters/f1_{}_{}.txt'.format(organism_id, ontology), 'r')
         lines = fileObject.readlines()
         parameters = {match.group(1): ast.literal_eval(match.group(2)) for match in map(lambda l: m.search(l), lines) if match}
